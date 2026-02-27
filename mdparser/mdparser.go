@@ -821,6 +821,23 @@ func (mr *mdNodeRenderer) inlineText(node gmast.Node) string {
 
 // ========== Word wrapping ==========
 
+// endsWithSentence returns true if the fragment text ends with
+// sentence-ending punctuation (. ? !), optionally followed by
+// closing quotes, parentheses, or brackets.
+func endsWithSentence(s string) bool {
+	for i := len(s) - 1; i >= 0; i-- {
+		switch s[i] {
+		case '.', '?', '!':
+			return true
+		case '"', '\'', ')', ']', '`':
+			continue // skip trailing closers
+		default:
+			return false
+		}
+	}
+	return false
+}
+
 // emitWrapped writes fragments word-wrapped at the configured width.
 func (mr *mdNodeRenderer) emitWrapped(fragments []inlineFragment, p string) error {
 	if len(fragments) == 0 {
@@ -833,6 +850,7 @@ func (mr *mdNodeRenderer) emitWrapped(fragments []inlineFragment, p string) erro
 	}
 
 	startOfLine := true
+	prevEndsSentence := false
 	for _, frag := range fragments {
 		wordLen := len(frag.text)
 
@@ -843,11 +861,15 @@ func (mr *mdNodeRenderer) emitWrapped(fragments []inlineFragment, p string) erro
 			col += wordLen
 			startOfLine = false
 		} else {
-			if col+1+wordLen <= mr.width {
-				if err := mr.emit(" " + frag.text); err != nil {
+			sp := " "
+			if prevEndsSentence {
+				sp = "  "
+			}
+			if col+len(sp)+wordLen <= mr.width {
+				if err := mr.emit(sp + frag.text); err != nil {
 					return err
 				}
-				col += 1 + wordLen
+				col += len(sp) + wordLen
 			} else {
 				if err := mr.emit("\n" + p + frag.text); err != nil {
 					return err
@@ -856,12 +878,15 @@ func (mr *mdNodeRenderer) emitWrapped(fragments []inlineFragment, p string) erro
 			}
 		}
 
+		prevEndsSentence = endsWithSentence(frag.text)
+
 		if frag.hardBreak {
 			if err := mr.emit("  \n" + p); err != nil {
 				return err
 			}
 			col = len(p)
 			startOfLine = true
+			prevEndsSentence = false
 		}
 	}
 
@@ -877,6 +902,7 @@ func (mr *mdNodeRenderer) emitWrappedContinuation(fragments []inlineFragment, p 
 
 	col := len(p)
 	startOfLine := true
+	prevEndsSentence := false
 
 	for _, frag := range fragments {
 		wordLen := len(frag.text)
@@ -888,11 +914,15 @@ func (mr *mdNodeRenderer) emitWrappedContinuation(fragments []inlineFragment, p 
 			col += wordLen
 			startOfLine = false
 		} else {
-			if col+1+wordLen <= mr.width {
-				if err := mr.emit(" " + frag.text); err != nil {
+			sp := " "
+			if prevEndsSentence {
+				sp = "  "
+			}
+			if col+len(sp)+wordLen <= mr.width {
+				if err := mr.emit(sp + frag.text); err != nil {
 					return err
 				}
-				col += 1 + wordLen
+				col += len(sp) + wordLen
 			} else {
 				if err := mr.emit("\n" + p + frag.text); err != nil {
 					return err
@@ -901,12 +931,15 @@ func (mr *mdNodeRenderer) emitWrappedContinuation(fragments []inlineFragment, p 
 			}
 		}
 
+		prevEndsSentence = endsWithSentence(frag.text)
+
 		if frag.hardBreak {
 			if err := mr.emit("  \n" + p); err != nil {
 				return err
 			}
 			col = len(p)
 			startOfLine = true
+			prevEndsSentence = false
 		}
 	}
 

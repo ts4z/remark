@@ -331,3 +331,50 @@ func TestFootnoteReference(t *testing.T) {
 		t.Errorf("got:\n%s\nwant:\n%s", got, want)
 	}
 }
+
+func TestDoubleSpaceAfterSentence(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "period",
+			input: "First sentence. Second sentence.\n",
+			want:  "First sentence.  Second sentence.\n",
+		},
+		{
+			name:  "question mark",
+			input: "Is it done? Yes it is.\n",
+			want:  "Is it done?  Yes it is.\n",
+		},
+		{
+			name:  "exclamation",
+			input: "Wow! That is great.\n",
+			want:  "Wow!  That is great.\n",
+		},
+		{
+			name:  "abbreviation mid-word not affected",
+			input: "Use the fmt package.\n",
+			want:  "Use the fmt package.\n",
+		},
+		{
+			name:  "comma not doubled",
+			input: "Hello, world.\n",
+			want:  "Hello, world.\n",
+		},
+		{
+			name:  "closing quote after period",
+			input: "He said \"hello.\" Then he left.\n",
+			want:  "He said \"hello.\"  Then he left.\n",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := roundTrip(t, tc.input, 79)
+			if got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
