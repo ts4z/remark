@@ -22,7 +22,7 @@ func initFlags() {
 }
 
 // process parses source with the given Parser and renders the result to w.
-func process(p Parser, source []byte, w io.Writer) error {
+func process(p *mdparser.Parser, source []byte, w io.Writer) error {
 	r, err := p.Parse(source)
 	if err != nil {
 		return err
@@ -32,7 +32,7 @@ func process(p Parser, source []byte, w io.Writer) error {
 
 // processFile reads a file, processes it, and writes the result back
 // atomically (via temp file + rename).
-func processFile(p Parser, filename string) error {
+func processFile(p *mdparser.Parser, filename string) error {
 	source, err := os.ReadFile(filename)
 	if err != nil {
 		return fmt.Errorf("reading %s: %w", filename, err)

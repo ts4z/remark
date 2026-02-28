@@ -12,7 +12,6 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/ts4z/mdindent/mdio"
 	"github.com/yuin/goldmark"
 	gmast "github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
@@ -41,8 +40,8 @@ func WithOneSpaceAfterSentence(v bool) Option {
 
 // Parser parses Markdown source into a Renderable using Goldmark.
 type Parser struct {
-	width                  int
-	oneSpaceAfterSentence  bool
+	width                 int
+	oneSpaceAfterSentence bool
 }
 
 // NewParser creates a Parser with the given options.
@@ -56,7 +55,7 @@ func NewParser(opts ...Option) *Parser {
 }
 
 // Parse parses source into a renderable Markdown document.
-func (p *Parser) Parse(source []byte) (mdio.Renderable, error) {
+func (p *Parser) Parse(source []byte) (*Renderable, error) {
 	md := goldmark.New(
 		goldmark.WithExtensions(
 			extension.GFM,
@@ -65,7 +64,7 @@ func (p *Parser) Parse(source []byte) (mdio.Renderable, error) {
 	)
 	reader := text.NewReader(source)
 	doc := md.Parser().Parse(reader)
-	return &renderable{
+	return &Renderable{
 		doc:                   doc,
 		source:                source,
 		width:                 p.width,
@@ -73,9 +72,9 @@ func (p *Parser) Parse(source []byte) (mdio.Renderable, error) {
 	}, nil
 }
 
-// renderable holds a parsed Goldmark AST, the original source, and
+// Renderable holds a parsed Goldmark AST, the original source, and
 // cached rendering options.
-type renderable struct {
+type Renderable struct {
 	doc                   gmast.Node
 	source                []byte
 	width                 int
@@ -84,11 +83,11 @@ type renderable struct {
 
 // Render writes reformatted Markdown to w.
 // It creates a fresh Goldmark renderer with our NodeRenderer for each call.
-func (r *renderable) Render(w io.Writer) error {
+func (r *Renderable) Render(w io.Writer) error {
 	nr := &mdNodeRenderer{
 		width:                 r.width,
 		source:                r.source,
-		atBlankLine:            true, // suppress blank line before first block
+		atBlankLine:           true, // suppress blank line before first block
 		oneSpaceAfterSentence: r.oneSpaceAfterSentence,
 	}
 	gmr := gmrenderer.NewRenderer(
@@ -103,11 +102,11 @@ type mdNodeRenderer struct {
 	width int
 
 	// Rendering state
-	source                 []byte
-	w                      util.BufWriter
-	atBlankLine            bool
-	oneSpaceAfterSentence  bool     // one space after sentence-ending punctuation
-	prefixes               []string // prefix stack for nesting
+	source                []byte
+	w                     util.BufWriter
+	atBlankLine           bool
+	oneSpaceAfterSentence bool     // one space after sentence-ending punctuation
+	prefixes              []string // prefix stack for nesting
 
 	// funcs stores registered render functions for manual sub-walks.
 	funcs map[gmast.NodeKind]gmrenderer.NodeRendererFunc
