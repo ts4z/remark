@@ -345,18 +345,33 @@ func TestDoubleSpaceAfterSentence(t *testing.T) {
 		want  string
 	}{
 		{
-			name:  "period",
+			name:  "preserves single space from source",
 			input: "First sentence. Second sentence.\n",
+			want:  "First sentence. Second sentence.\n",
+		},
+		{
+			name:  "preserves double space from source",
+			input: "First sentence.  Second sentence.\n",
 			want:  "First sentence.  Second sentence.\n",
 		},
 		{
-			name:  "question mark",
+			name:  "question mark preserves single space",
 			input: "Is it done? Yes it is.\n",
+			want:  "Is it done? Yes it is.\n",
+		},
+		{
+			name:  "question mark preserves double space",
+			input: "Is it done?  Yes it is.\n",
 			want:  "Is it done?  Yes it is.\n",
 		},
 		{
-			name:  "exclamation",
+			name:  "exclamation preserves single space",
 			input: "Wow! That is great.\n",
+			want:  "Wow! That is great.\n",
+		},
+		{
+			name:  "exclamation preserves double space",
+			input: "Wow!  That is great.\n",
 			want:  "Wow!  That is great.\n",
 		},
 		{
@@ -370,29 +385,49 @@ func TestDoubleSpaceAfterSentence(t *testing.T) {
 			want:  "Hello, world.\n",
 		},
 		{
-			name:  "closing quote after period",
-			input: "He said \"hello.\" Then he left.\n",
+			name:  "closing quote after period preserves spacing",
+			input: "He said \"hello.\"  Then he left.\n",
 			want:  "He said \"hello.\"  Then he left.\n",
 		},
 		{
-			name:  "i.e. is not sentence end",
+			name:  "i.e. preserves single space",
 			input: "A low hand (i.e. just like razz).\n",
 			want:  "A low hand (i.e. just like razz).\n",
 		},
 		{
-			name:  "e.g. is not sentence end",
+			name:  "e.g. preserves single space",
 			input: "Use a tool (e.g. mdindent) for this.\n",
 			want:  "Use a tool (e.g. mdindent) for this.\n",
 		},
 		{
-			name:  "period before lowercase not doubled",
-			input: "The value of x. is used here.\n",
-			want:  "The value of x. is used here.\n",
+			name:  "J.C.R. preserves single space",
+			input: "J.C.R. Licklider wrote about it.\n",
+			want:  "J.C.R. Licklider wrote about it.\n",
+		},
+		{
+			name:  "J. C. R. preserves single spaces",
+			input: "J. C. R. Licklider wrote about it.\n",
+			want:  "J. C. R. Licklider wrote about it.\n",
+		},
+		{
+			name:  "line boundary uses double space default",
+			input: "First sentence.\nSecond sentence.\n",
+			want:  "First sentence.  Second sentence.\n",
+		},
+		{
+			name:  "line boundary with -1 flag uses single space",
+			input: "First sentence.\nSecond sentence.\n",
+			want:  "First sentence. Second sentence.\n",
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := roundTrip(t, tc.input, 79)
+			var got string
+			if tc.name == "line boundary with -1 flag uses single space" {
+				got = roundTripWith(t, tc.input, WithWidth(79), WithOneSpaceAfterSentence(true))
+			} else {
+				got = roundTrip(t, tc.input, 79)
+			}
 			if got != tc.want {
 				t.Errorf("got %q, want %q", got, tc.want)
 			}

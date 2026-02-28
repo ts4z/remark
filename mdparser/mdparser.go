@@ -778,8 +778,9 @@ func (mr *mdNodeRenderer) renderFootnoteInner(fn *gmext.Footnote) error {
 // inlineFragment represents a piece of inline content (typically a word
 // or marked-up unit).
 type inlineFragment struct {
-	text      string
-	hardBreak bool // force a line break after this fragment
+	text        string
+	hardBreak   bool // force a line break after this fragment
+	spacesAfter int  // spaces after this fragment in source (-1 = unknown, use default)
 }
 
 // inlineFragments collects the inline content of a block node into fragments.
@@ -795,7 +796,7 @@ func (mr *mdNodeRenderer) collectInlineFragments(node gmast.Node, frags *[]inlin
 		switch n := child.(type) {
 		case *gmast.Text:
 			val := string(n.Value(mr.source))
-			words := strings.Fields(val)
+			words, spacings, trailingSpaces := parseWordsWithSpacing(val)
 			// If the raw text has no leading whitespace AND the
 			// previous sibling is an inline markup node, glue the
 			// first word to the previous fragment.  This handles
@@ -805,11 +806,19 @@ func (mr *mdNodeRenderer) collectInlineFragments(node gmast.Node, frags *[]inlin
 			// (where consecutive Text nodes represent source lines).
 			glue := len(val) > 0 && !unicode.IsSpace(rune(val[0])) && mr.prevIsMarkup(child)
 			for i, w := range words {
+				// Determine spacesAfter for this word.
+				sa := -1
+				if i < len(spacings) {
+					sa = spacings[i]
+				} else if trailingSpaces > 0 {
+					sa = min(trailingSpaces, 2)
+				}
 				if i == 0 && glue && len(*frags) > 0 {
 					// Append to the previous fragment.
 					(*frags)[len(*frags)-1].text += w
+					(*frags)[len(*frags)-1].spacesAfter = sa
 				} else {
-					*frags = append(*frags, inlineFragment{text: w})
+					*frags = append(*frags, inlineFragment{text: w, spacesAfter: sa})
 				}
 			}
 			if n.HardLineBreak() {
@@ -924,8 +933,9 @@ func (mr *mdNodeRenderer) prevTextHasNoTrailingSpace(n gmast.Node) bool {
 func (mr *mdNodeRenderer) addInlineFrag(frags *[]inlineFragment, node gmast.Node, text string) {
 	if mr.prevTextHasNoTrailingSpace(node) && len(*frags) > 0 {
 		(*frags)[len(*frags)-1].text += text
+		(*frags)[len(*frags)-1].spacesAfter = -1
 	} else {
-		*frags = append(*frags, inlineFragment{text: text})
+		*frags = append(*frags, inlineFragment{text: text, spacesAfter: -1})
 	}
 }
 
@@ -945,10 +955,12 @@ func (mr *mdNodeRenderer) addBreakableMarkupFrags(
 	}
 	innerFrags[0].text = prefix + innerFrags[0].text
 	innerFrags[len(innerFrags)-1].text += suffix
+	innerFrags[len(innerFrags)-1].spacesAfter = -1 // unknown: depends on outer context
 	// Glue the first inner fragment to the previous fragment when
 	// the link immediately follows text with no whitespace.
 	if mr.prevTextHasNoTrailingSpace(node) && len(*frags) > 0 {
 		(*frags)[len(*frags)-1].text += innerFrags[0].text
+		(*frags)[len(*frags)-1].spacesAfter = innerFrags[0].spacesAfter
 		*frags = append(*frags, innerFrags[1:]...)
 	} else {
 		*frags = append(*frags, innerFrags...)
@@ -1019,66 +1031,49 @@ func endsWithSentence(s string) bool {
 	return false
 }
 
-// neverEndsSentence is the set of abbreviations (lowercased) that are
-// never followed by a sentence break, even though they end with a period.
-var neverEndsSentence = map[string]bool{
-	"i.e.": true, "e.g.": true, "cf.": true, "vs.": true,
-	"viz.": true, "al.": true, "approx.": true, "dept.": true,
-	"est.": true, "govt.": true, "no.": true,
-}
-
-// isKnownAbbreviation returns true if word (ignoring any trailing
-// closers like quotes or parens) is a known abbreviation that never
-// ends a sentence.
-func isKnownAbbreviation(s string) bool {
-	// Strip trailing closers to find the core word.
-	end := len(s)
-	for end > 0 {
-		switch s[end-1] {
-		case '"', '\'', ')', ']', '`':
-			end--
-			continue
-		}
-		break
-	}
-	// Strip leading markup to find the core word.
-	start := 0
-	for start < end {
-		switch s[start] {
-		case '*', '_', '~', '`', '[', '(':
-			start++
-			continue
-		}
-		break
-	}
-	return neverEndsSentence[strings.ToLower(s[start:end])]
-}
-
-// startsWithUpper returns true if the first letter of s is uppercase.
-// Returns false for empty strings or strings starting with non-letters.
-func startsWithUpper(s string) bool {
-	for _, r := range s {
-		if unicode.IsLetter(r) {
-			return unicode.IsUpper(r)
-		}
-		// Skip leading markup characters like [, *, !, ~
-		switch r {
-		case '[', '(', '*', '_', '~', '`', '!':
-			continue
-		}
-		return false
-	}
-	return false
-}
-
-// sentenceBreak returns the spacing to use between two fragments.
+// sentenceBreak returns the default spacing to use between two fragments
+// when the original source spacing is unknown (e.g. at a line boundary).
 // It returns "  " (double space) when the previous fragment ends a
-// sentence and the next fragment starts a new one.
-func sentenceBreak(prev, next string, oneSpaceAfterSentence bool) string {
-	if !oneSpaceAfterSentence && endsWithSentence(prev) && !isKnownAbbreviation(prev) && startsWithUpper(next) {
+// sentence, unless oneSpaceAfterSentence is set.
+func sentenceBreak(prev string, oneSpaceAfterSentence bool) string {
+	if !oneSpaceAfterSentence && endsWithSentence(prev) {
 		return "  "
 	}
 	return " "
+}
+
+// parseWordsWithSpacing splits a string into words and records inter-word
+// spacing.  spacings[i] is the number of spaces between words[i] and
+// words[i+1], capped at 2.  trailingSpaces is the number of spaces
+// after the last word, capped at 2.
+func parseWordsWithSpacing(s string) (words []string, spacings []int, trailingSpaces int) {
+	i := 0
+	// Skip leading whitespace.
+	for i < len(s) && (s[i] == ' ' || s[i] == '\t') {
+		i++
+	}
+	for i < len(s) {
+		// Find end of word.
+		j := i
+		for j < len(s) && s[j] != ' ' && s[j] != '\t' {
+			j++
+		}
+		words = append(words, s[i:j])
+		// Count trailing spaces.
+		k := j
+		for k < len(s) && (s[k] == ' ' || s[k] == '\t') {
+			k++
+		}
+		if k < len(s) {
+			// Another word follows; record gap capped at 2.
+			spacings = append(spacings, min(k-j, 2))
+		} else {
+			// End of string; record trailing spaces.
+			trailingSpaces = min(k-j, 2)
+		}
+		i = k
+	}
+	return
 }
 
 // emitWrapped writes fragments word-wrapped at the configured width.
@@ -1093,7 +1088,7 @@ func (mr *mdNodeRenderer) emitWrapped(fragments []inlineFragment, p string) erro
 	}
 
 	startOfLine := true
-	prevText := ""
+	var prevFrag inlineFragment
 	for _, frag := range fragments {
 		wordLen := len(frag.text)
 
@@ -1104,7 +1099,7 @@ func (mr *mdNodeRenderer) emitWrapped(fragments []inlineFragment, p string) erro
 			col += wordLen
 			startOfLine = false
 		} else {
-			sp := sentenceBreak(prevText, frag.text, mr.oneSpaceAfterSentence)
+			sp := mr.spacingAfter(prevFrag)
 			if col+len(sp)+wordLen <= mr.width {
 				if err := mr.emit(sp + frag.text); err != nil {
 					return err
@@ -1118,7 +1113,7 @@ func (mr *mdNodeRenderer) emitWrapped(fragments []inlineFragment, p string) erro
 			}
 		}
 
-		prevText = frag.text
+		prevFrag = frag
 
 		if frag.hardBreak {
 			if err := mr.emit("  \n" + p); err != nil {
@@ -1126,11 +1121,26 @@ func (mr *mdNodeRenderer) emitWrapped(fragments []inlineFragment, p string) erro
 			}
 			col = len(p)
 			startOfLine = true
-			prevText = ""
+			prevFrag = inlineFragment{}
 		}
 	}
 
 	return mr.emit("\n")
+}
+
+// spacingAfter returns the spacing string to emit after a fragment.
+// If the fragment has a known spacesAfter from the original source,
+// that is preserved; otherwise the default sentence-break heuristic
+// is used.
+func (mr *mdNodeRenderer) spacingAfter(prev inlineFragment) string {
+	if prev.spacesAfter >= 1 {
+		if prev.spacesAfter >= 2 {
+			return "  "
+		}
+		return " "
+	}
+	// Unknown spacing (line boundary or markup): use flag-based default.
+	return sentenceBreak(prev.text, mr.oneSpaceAfterSentence)
 }
 
 // emitWrappedContinuation is like emitWrapped but assumes the first line's
@@ -1142,7 +1152,7 @@ func (mr *mdNodeRenderer) emitWrappedContinuation(fragments []inlineFragment, p 
 
 	col := len(p)
 	startOfLine := true
-	prevText := ""
+	var prevFrag inlineFragment
 
 	for _, frag := range fragments {
 		wordLen := len(frag.text)
@@ -1154,7 +1164,7 @@ func (mr *mdNodeRenderer) emitWrappedContinuation(fragments []inlineFragment, p 
 			col += wordLen
 			startOfLine = false
 		} else {
-			sp := sentenceBreak(prevText, frag.text, mr.oneSpaceAfterSentence)
+			sp := mr.spacingAfter(prevFrag)
 			if col+len(sp)+wordLen <= mr.width {
 				if err := mr.emit(sp + frag.text); err != nil {
 					return err
@@ -1168,7 +1178,7 @@ func (mr *mdNodeRenderer) emitWrappedContinuation(fragments []inlineFragment, p 
 			}
 		}
 
-		prevText = frag.text
+		prevFrag = frag
 
 		if frag.hardBreak {
 			if err := mr.emit("  \n" + p); err != nil {
@@ -1176,7 +1186,7 @@ func (mr *mdNodeRenderer) emitWrappedContinuation(fragments []inlineFragment, p 
 			}
 			col = len(p)
 			startOfLine = true
-			prevText = ""
+			prevFrag = inlineFragment{}
 		}
 	}
 
