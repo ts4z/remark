@@ -798,13 +798,15 @@ func (mr *mdNodeRenderer) collectInlineFragments(node gmast.Node, frags *[]inlin
 			val := string(n.Value(mr.source))
 			words, spacings, trailingSpaces := parseWordsWithSpacing(val)
 			// If the raw text has no leading whitespace AND the
-			// previous sibling is an inline markup node, glue the
-			// first word to the previous fragment.  This handles
-			// punctuation after inline markup (e.g. "[x](url)."
-			// where "." is a separate Text node) without
-			// incorrectly merging words across line continuations
-			// (where consecutive Text nodes represent source lines).
-			glue := len(val) > 0 && !unicode.IsSpace(rune(val[0])) && mr.prevIsMarkup(child)
+			// previous sibling is an inline markup node OR a Text
+			// node with no trailing whitespace, glue the first word
+			// to the previous fragment.  This handles punctuation
+			// after inline markup (e.g. "[x](url)." where "." is a
+			// separate Text node) and non-link brackets that
+			// Goldmark splits into separate Text nodes (e.g.
+			// ".  [" followed by "This").
+			glue := len(val) > 0 && !unicode.IsSpace(rune(val[0])) &&
+				(mr.prevIsMarkup(child) || mr.prevTextHasNoTrailingSpace(child))
 			for i, w := range words {
 				// Determine spacesAfter for this word.
 				sa := -1
@@ -1036,10 +1038,48 @@ func endsWithSentence(s string) bool {
 // It returns "  " (double space) when the previous fragment ends a
 // sentence, unless oneSpaceAfterSentence is set.
 func sentenceBreak(prev string, oneSpaceAfterSentence bool) string {
-	if !oneSpaceAfterSentence && endsWithSentence(prev) {
+	if !oneSpaceAfterSentence && endsWithSentence(prev) && !looksLikeInitial(prev) {
 		return "  "
 	}
 	return " "
+}
+
+// looksLikeInitial returns true if the text looks like a personal initial
+// such as "J." or "**J.**" — a single letter followed by a period,
+// possibly surrounded by markup characters and trailing closers.
+// Single-letter initials are never sentence endings.
+func looksLikeInitial(s string) bool {
+	// Strip trailing closers and markup.
+	end := len(s)
+	for end > 0 {
+		switch s[end-1] {
+		case '"', '\'', ')', ']', '`', '*', '_', '~':
+			end--
+			continue
+		}
+		break
+	}
+	// Must end with a period.
+	if end == 0 || s[end-1] != '.' {
+		return false
+	}
+	end--
+	// Strip leading markup.
+	start := 0
+	for start < end {
+		switch s[start] {
+		case '*', '_', '~', '`', '[', '(':
+			start++
+			continue
+		}
+		break
+	}
+	// What remains must be a single letter.
+	if end-start != 1 {
+		return false
+	}
+	r := rune(s[start])
+	return unicode.IsLetter(r)
 }
 
 // parseWordsWithSpacing splits a string into words and records inter-word

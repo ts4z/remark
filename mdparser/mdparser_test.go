@@ -338,6 +338,15 @@ func TestFootnoteReference(t *testing.T) {
 	}
 }
 
+func TestNonLinkBrackets(t *testing.T) {
+	input := "See [Rocket J. Squirrel's Rules of Flight](https://example.com/).  [This link has been updated, as Rocky has left Wossamatta.edu.]\n"
+	want := "See [Rocket J. Squirrel's Rules of Flight](https://example.com/).  [This link\nhas been updated, as Rocky has left Wossamatta.edu.]\n"
+	got := roundTrip(t, input, 79)
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 func TestDoubleSpaceAfterSentence(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -413,6 +422,16 @@ func TestDoubleSpaceAfterSentence(t *testing.T) {
 			name:  "line boundary uses double space default",
 			input: "First sentence.\nSecond sentence.\n",
 			want:  "First sentence.  Second sentence.\n",
+		},
+		{
+			name:  "initial at line boundary not doubled",
+			input: "Rocket J.\nSquirrel is here.\n",
+			want:  "Rocket J. Squirrel is here.\n",
+		},
+		{
+			name:  "initial in list item preserved",
+			input: "* Rocket J. Squirrel\n",
+			want:  "* Rocket J. Squirrel\n",
 		},
 		{
 			name:  "line boundary with -1 flag uses single space",
