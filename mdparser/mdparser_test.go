@@ -3,10 +3,18 @@ package mdparser
 import (
 	"bytes"
 	"testing"
+
+	"github.com/ts4z/mdindent/mdio"
 )
 
 // roundTrip parses source with width and renders back to a string.
 func roundTrip(t *testing.T, source string, width int) string {
+	t.Helper()
+	return roundTripOpts(t, source, mdio.RenderOptions{Width: width})
+}
+
+// roundTripOpts parses source and renders with the given options.
+func roundTripOpts(t *testing.T, source string, opts mdio.RenderOptions) string {
 	t.Helper()
 	p := &Parser{}
 	r, err := p.Parse([]byte(source))
@@ -14,7 +22,7 @@ func roundTrip(t *testing.T, source string, width int) string {
 		t.Fatalf("Parse error: %v", err)
 	}
 	var buf bytes.Buffer
-	if err := r.Render(&buf, width); err != nil {
+	if err := r.Render(&buf, opts); err != nil {
 		t.Fatalf("Render error: %v", err)
 	}
 	return buf.String()
@@ -368,12 +376,116 @@ func TestDoubleSpaceAfterSentence(t *testing.T) {
 			input: "He said \"hello.\" Then he left.\n",
 			want:  "He said \"hello.\"  Then he left.\n",
 		},
+		{
+			name:  "i.e. is not sentence end",
+			input: "A low hand (i.e. just like razz).\n",
+			want:  "A low hand (i.e. just like razz).\n",
+		},
+		{
+			name:  "e.g. is not sentence end",
+			input: "Use a tool (e.g. mdindent) for this.\n",
+			want:  "Use a tool (e.g. mdindent) for this.\n",
+		},
+		{
+			name:  "period before lowercase not doubled",
+			input: "The value of x. is used here.\n",
+			want:  "The value of x. is used here.\n",
+		},
+	}
+	opts := mdio.RenderOptions{Width: 79, TwoSpacesAfterSentence: true}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := roundTripOpts(t, tc.input, opts)
+			if got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDefaultSingleSpaceAfterSentence(t *testing.T) {
+	input := "First sentence. Second sentence.\n"
+	want := "First sentence. Second sentence.\n"
+	got := roundTrip(t, input, 79)
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestFootnotePositionPreserved(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "footnote between paragraphs",
+			input: "First paragraph with a reference[^1].\n\n[^1]: The footnote text.\n\nSecond paragraph.\n",
+			want:  "First paragraph with a reference[^1].\n\n[^1]: The footnote text.\n\nSecond paragraph.\n",
+		},
+		{
+			name:  "footnote at end stays at end",
+			input: "First paragraph.\n\nSecond paragraph with ref[^1].\n\n[^1]: Footnote at the end.\n",
+			want:  "First paragraph.\n\nSecond paragraph with ref[^1].\n\n[^1]: Footnote at the end.\n",
+		},
+		{
+			name:  "multiple footnotes preserve order",
+			input: "Para one[^1].\n\n[^1]: First note.\n\nPara two[^2].\n\n[^2]: Second note.\n",
+			want:  "Para one[^1].\n\n[^1]: First note.\n\nPara two[^2].\n\n[^2]: Second note.\n",
+		},
+		{
+			name:  "duplicate reference not re-rendered",
+			input: "Para one[^1].\n\n[^1]: The note.\n\nPara two also uses[^1].\n",
+			want:  "Para one[^1].\n\n[^1]: The note.\n\nPara two also uses[^1].\n",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got := roundTrip(t, tc.input, 79)
 			if got != tc.want {
-				t.Errorf("got %q, want %q", got, tc.want)
+				t.Errorf("got:\n%s\nwant:\n%s", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestLinkTextBreaksAcrossLines(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		width int
+		want  string
+	}{
+		{
+			name:  "break inside link text",
+			input: "The best five-card [Action Razz](action-razz.md) hand and the best four-card [Badugi](badugi.md) hand split the pot.\n",
+			width: 72,
+			want:  "The best five-card [Action Razz](action-razz.md) hand and the best\nfour-card [Badugi](badugi.md) hand split the pot.\n",
+		},
+		{
+			name:  "break between link bracket and text",
+			input: "There is no qualifier for either the [Action Razz](action-razz.md) or [Badugi](badugi.md) hand.\n",
+			width: 50,
+			want:  "There is no qualifier for either the [Action\nRazz](action-razz.md) or [Badugi](badugi.md) hand.\n",
+		},
+		{
+			name:  "image text breaks",
+			input: "See the ![important diagram label](diagram.png) for details.\n",
+			width: 40,
+			want:  "See the ![important diagram\nlabel](diagram.png) for details.\n",
+		},
+		{
+			name:  "single-word link stays atomic",
+			input: "Visit [example](https://example.com) for details.\n",
+			width: 79,
+			want:  "Visit [example](https://example.com) for details.\n",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := roundTrip(t, tc.input, tc.width)
+			if got != tc.want {
+				t.Errorf("got:\n%s\nwant:\n%s", got, tc.want)
 			}
 		})
 	}

@@ -8,6 +8,7 @@ package mdparser
 import (
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 	"unicode"
 
@@ -46,11 +47,12 @@ type renderable struct {
 
 // Render writes reformatted Markdown to w, wrapping paragraphs at width.
 // It creates a fresh Goldmark renderer with our NodeRenderer for each call.
-func (r *renderable) Render(w io.Writer, width int) error {
+func (r *renderable) Render(w io.Writer, opts mdio.RenderOptions) error {
 	nr := &mdNodeRenderer{
-		width:       width,
-		source:      r.source,
-		atBlankLine: true, // suppress blank line before first block
+		width:                  opts.Width,
+		source:                 r.source,
+		atBlankLine:            true, // suppress blank line before first block
+		twoSpacesAfterSentence: opts.TwoSpacesAfterSentence,
 	}
 	gmr := gmrenderer.NewRenderer(
 		gmrenderer.WithNodeRenderers(util.Prioritized(nr, 1000)),
@@ -61,11 +63,12 @@ func (r *renderable) Render(w io.Writer, width int) error {
 // mdNodeRenderer implements goldmark's renderer.NodeRenderer interface,
 // rendering AST nodes back to formatted Markdown with word wrapping.
 type mdNodeRenderer struct {
-	width       int
-	source      []byte
-	w           util.BufWriter
-	atBlankLine bool
-	prefixes    []string // prefix stack for nesting
+	width                  int
+	source                 []byte
+	w                      util.BufWriter
+	atBlankLine            bool
+	twoSpacesAfterSentence bool     // use two spaces after sentence-ending punctuation
+	prefixes               []string // prefix stack for nesting
 
 	// funcs stores registered render functions for manual sub-walks.
 	funcs map[gmast.NodeKind]gmrenderer.NodeRendererFunc
@@ -149,10 +152,138 @@ func (mr *mdNodeRenderer) blankLine() error {
 func (mr *mdNodeRenderer) renderDocument(
 	w util.BufWriter, source []byte, n gmast.Node, entering bool,
 ) (gmast.WalkStatus, error) {
-	if entering {
-		mr.w = w // capture writer for helper methods
+	if !entering {
+		return gmast.WalkContinue, nil
 	}
-	return gmast.WalkContinue, nil
+	mr.w = w // capture writer for helper methods
+
+	// Collect footnote definitions from the AST.
+	var footnotes []*gmext.Footnote
+	for child := n.FirstChild(); child != nil; child = child.NextSibling() {
+		if fl, ok := child.(*gmext.FootnoteList); ok {
+			for fc := fl.FirstChild(); fc != nil; fc = fc.NextSibling() {
+				if fn, ok := fc.(*gmext.Footnote); ok {
+					footnotes = append(footnotes, fn)
+				}
+			}
+		}
+	}
+
+	// Find footnote definition source positions.
+	fnPositions := mr.footnoteSourcePositions(footnotes)
+
+	// Collect regular (non-FootnoteList) block children with positions.
+	type blockEntry struct {
+		node gmast.Node
+		pos  int
+	}
+	var blocks []blockEntry
+	for child := n.FirstChild(); child != nil; child = child.NextSibling() {
+		if _, ok := child.(*gmext.FootnoteList); ok {
+			continue // skip; footnotes will be interleaved
+		}
+		blocks = append(blocks, blockEntry{node: child, pos: mr.blockStartPos(child)})
+	}
+
+	// Merge blocks and footnotes in source order.
+	renderedFootnotes := map[int]bool{}
+	bi, fi := 0, 0
+	first := true
+
+	for bi < len(blocks) || fi < len(fnPositions) {
+		// Decide whether to emit the next block or the next footnote.
+		emitFootnote := false
+		if fi < len(fnPositions) {
+			if bi >= len(blocks) {
+				emitFootnote = true
+			} else {
+				emitFootnote = fnPositions[fi].pos < blocks[bi].pos
+			}
+		}
+
+		if emitFootnote {
+			fn := fnPositions[fi].fn
+			fi++
+			if renderedFootnotes[fn.Index] {
+				continue
+			}
+			renderedFootnotes[fn.Index] = true
+			if !first {
+				if err := mr.blankLine(); err != nil {
+					return gmast.WalkStop, err
+				}
+			}
+			first = false
+			if err := mr.renderFootnoteInner(fn); err != nil {
+				return gmast.WalkStop, err
+			}
+		} else {
+			block := blocks[bi]
+			bi++
+			if !first {
+				if err := mr.blankLine(); err != nil {
+					return gmast.WalkStop, err
+				}
+			}
+			first = false
+			if err := mr.walkNode(block.node); err != nil {
+				return gmast.WalkStop, err
+			}
+		}
+	}
+
+	return gmast.WalkSkipChildren, nil
+}
+
+// footnotePos pairs a footnote with its source position.
+type footnotePos struct {
+	fn  *gmext.Footnote
+	pos int
+}
+
+// footnoteSourcePositions finds where each footnote definition appears
+// in the source by scanning for [^ref]: patterns.
+func (mr *mdNodeRenderer) footnoteSourcePositions(footnotes []*gmext.Footnote) []footnotePos {
+	if len(footnotes) == 0 {
+		return nil
+	}
+
+	// Build a map from ref label to footnote.
+	refMap := map[string]*gmext.Footnote{}
+	for _, fn := range footnotes {
+		refMap[string(fn.Ref)] = fn
+	}
+
+	// Scan source for [^ref]: patterns, in order.
+	re := regexp.MustCompile(`(?m)^\[\^([^\]]+)\]:`)
+	matches := re.FindAllSubmatchIndex(mr.source, -1)
+
+	var result []footnotePos
+	seen := map[string]bool{}
+	for _, m := range matches {
+		ref := string(mr.source[m[2]:m[3]])
+		if seen[ref] {
+			continue
+		}
+		if fn, ok := refMap[ref]; ok {
+			result = append(result, footnotePos{fn: fn, pos: m[0]})
+			seen[ref] = true
+		}
+	}
+	return result
+}
+
+// blockStartPos returns the source byte offset where a block node begins.
+func (mr *mdNodeRenderer) blockStartPos(n gmast.Node) int {
+	if n.Type() != gmast.TypeInline {
+		if lines := n.Lines(); lines != nil && lines.Len() > 0 {
+			return lines.At(0).Start
+		}
+	}
+	if c := n.FirstChild(); c != nil {
+		return mr.blockStartPos(c)
+	}
+	return 0
 }
 
 // ---------- Heading ----------
@@ -548,25 +679,13 @@ func (mr *mdNodeRenderer) emitTableSeparator(
 }
 
 // ---------- FootnoteList (GFM) ----------
+// Footnotes are rendered by renderDocument at their original source
+// positions.  This handler is a no-op that skips the FootnoteList
+// in the normal walk.
 
 func (mr *mdNodeRenderer) renderFootnoteList(
 	w util.BufWriter, source []byte, n gmast.Node, entering bool,
 ) (gmast.WalkStatus, error) {
-	if !entering {
-		return gmast.WalkContinue, nil
-	}
-	for child := n.FirstChild(); child != nil; child = child.NextSibling() {
-		fn, ok := child.(*gmext.Footnote)
-		if !ok {
-			continue
-		}
-		if err := mr.blankLine(); err != nil {
-			return gmast.WalkStop, err
-		}
-		if err := mr.renderFootnoteInner(fn); err != nil {
-			return gmast.WalkStop, err
-		}
-	}
 	return gmast.WalkSkipChildren, nil
 }
 
@@ -671,25 +790,23 @@ func (mr *mdNodeRenderer) collectInlineFragments(node gmast.Node, frags *[]inlin
 			}
 			mr.addInlineFrag(frags, child, marker+inner+marker)
 		case *gmast.Link:
-			linkText := mr.collectInlineString(n)
 			dest := string(n.Destination)
 			title := string(n.Title)
-			s := "[" + linkText + "](" + dest
+			suffix := "](" + dest
 			if title != "" {
-				s += " \"" + title + "\""
+				suffix += " \"" + title + "\""
 			}
-			s += ")"
-			mr.addInlineFrag(frags, child, s)
+			suffix += ")"
+			mr.addBreakableMarkupFrags(frags, child, "[", suffix)
 		case *gmast.Image:
-			altText := mr.collectInlineString(n)
 			dest := string(n.Destination)
 			title := string(n.Title)
-			s := "![" + altText + "](" + dest
+			suffix := "](" + dest
 			if title != "" {
-				s += " \"" + title + "\""
+				suffix += " \"" + title + "\""
 			}
-			s += ")"
-			mr.addInlineFrag(frags, child, s)
+			suffix += ")"
+			mr.addBreakableMarkupFrags(frags, child, "![", suffix)
 		case *gmast.AutoLink:
 			url := string(n.URL(mr.source))
 			mr.addInlineFrag(frags, child, "<"+url+">")
@@ -774,6 +891,32 @@ func (mr *mdNodeRenderer) addInlineFrag(frags *[]inlineFragment, node gmast.Node
 	}
 }
 
+// addBreakableMarkupFrags adds fragments for a link or image whose inner
+// text can be broken across lines.  The prefix ("[" or "![") is prepended
+// to the first inner word, and the suffix ("](url)") is appended to the
+// last inner word.  If there are multiple inner words, intermediate ones
+// become independent fragments that allow line breaks.
+func (mr *mdNodeRenderer) addBreakableMarkupFrags(
+	frags *[]inlineFragment, node gmast.Node, prefix, suffix string,
+) {
+	innerFrags := mr.inlineFragments(node)
+	if len(innerFrags) == 0 {
+		// Empty content: [](url) or ![](url)
+		mr.addInlineFrag(frags, node, prefix+suffix)
+		return
+	}
+	innerFrags[0].text = prefix + innerFrags[0].text
+	innerFrags[len(innerFrags)-1].text += suffix
+	// Glue the first inner fragment to the previous fragment when
+	// the link immediately follows text with no whitespace.
+	if mr.prevTextHasNoTrailingSpace(node) && len(*frags) > 0 {
+		(*frags)[len(*frags)-1].text += innerFrags[0].text
+		*frags = append(*frags, innerFrags[1:]...)
+	} else {
+		*frags = append(*frags, innerFrags...)
+	}
+}
+
 // collectRawText returns the raw text content of an inline node's children.
 func (mr *mdNodeRenderer) collectRawText(node gmast.Node) string {
 	var sb strings.Builder
@@ -838,6 +981,68 @@ func endsWithSentence(s string) bool {
 	return false
 }
 
+// neverEndsSentence is the set of abbreviations (lowercased) that are
+// never followed by a sentence break, even though they end with a period.
+var neverEndsSentence = map[string]bool{
+	"i.e.": true, "e.g.": true, "cf.": true, "vs.": true,
+	"viz.": true, "al.": true, "approx.": true, "dept.": true,
+	"est.": true, "govt.": true, "no.": true,
+}
+
+// isKnownAbbreviation returns true if word (ignoring any trailing
+// closers like quotes or parens) is a known abbreviation that never
+// ends a sentence.
+func isKnownAbbreviation(s string) bool {
+	// Strip trailing closers to find the core word.
+	end := len(s)
+	for end > 0 {
+		switch s[end-1] {
+		case '"', '\'', ')', ']', '`':
+			end--
+			continue
+		}
+		break
+	}
+	// Strip leading markup to find the core word.
+	start := 0
+	for start < end {
+		switch s[start] {
+		case '*', '_', '~', '`', '[', '(':
+			start++
+			continue
+		}
+		break
+	}
+	return neverEndsSentence[strings.ToLower(s[start:end])]
+}
+
+// startsWithUpper returns true if the first letter of s is uppercase.
+// Returns false for empty strings or strings starting with non-letters.
+func startsWithUpper(s string) bool {
+	for _, r := range s {
+		if unicode.IsLetter(r) {
+			return unicode.IsUpper(r)
+		}
+		// Skip leading markup characters like [, *, !, ~
+		switch r {
+		case '[', '(', '*', '_', '~', '`', '!':
+			continue
+		}
+		return false
+	}
+	return false
+}
+
+// sentenceBreak returns the spacing to use between two fragments.
+// It returns "  " (double space) when the previous fragment ends a
+// sentence and the next fragment starts a new one.
+func sentenceBreak(prev, next string, twoSpacesAfterSentence bool) string {
+	if twoSpacesAfterSentence && endsWithSentence(prev) && !isKnownAbbreviation(prev) && startsWithUpper(next) {
+		return "  "
+	}
+	return " "
+}
+
 // emitWrapped writes fragments word-wrapped at the configured width.
 func (mr *mdNodeRenderer) emitWrapped(fragments []inlineFragment, p string) error {
 	if len(fragments) == 0 {
@@ -850,7 +1055,7 @@ func (mr *mdNodeRenderer) emitWrapped(fragments []inlineFragment, p string) erro
 	}
 
 	startOfLine := true
-	prevEndsSentence := false
+	prevText := ""
 	for _, frag := range fragments {
 		wordLen := len(frag.text)
 
@@ -861,10 +1066,7 @@ func (mr *mdNodeRenderer) emitWrapped(fragments []inlineFragment, p string) erro
 			col += wordLen
 			startOfLine = false
 		} else {
-			sp := " "
-			if prevEndsSentence {
-				sp = "  "
-			}
+			sp := sentenceBreak(prevText, frag.text, mr.twoSpacesAfterSentence)
 			if col+len(sp)+wordLen <= mr.width {
 				if err := mr.emit(sp + frag.text); err != nil {
 					return err
@@ -878,7 +1080,7 @@ func (mr *mdNodeRenderer) emitWrapped(fragments []inlineFragment, p string) erro
 			}
 		}
 
-		prevEndsSentence = endsWithSentence(frag.text)
+		prevText = frag.text
 
 		if frag.hardBreak {
 			if err := mr.emit("  \n" + p); err != nil {
@@ -886,7 +1088,7 @@ func (mr *mdNodeRenderer) emitWrapped(fragments []inlineFragment, p string) erro
 			}
 			col = len(p)
 			startOfLine = true
-			prevEndsSentence = false
+			prevText = ""
 		}
 	}
 
@@ -902,7 +1104,7 @@ func (mr *mdNodeRenderer) emitWrappedContinuation(fragments []inlineFragment, p 
 
 	col := len(p)
 	startOfLine := true
-	prevEndsSentence := false
+	prevText := ""
 
 	for _, frag := range fragments {
 		wordLen := len(frag.text)
@@ -914,10 +1116,7 @@ func (mr *mdNodeRenderer) emitWrappedContinuation(fragments []inlineFragment, p 
 			col += wordLen
 			startOfLine = false
 		} else {
-			sp := " "
-			if prevEndsSentence {
-				sp = "  "
-			}
+			sp := sentenceBreak(prevText, frag.text, mr.twoSpacesAfterSentence)
 			if col+len(sp)+wordLen <= mr.width {
 				if err := mr.emit(sp + frag.text); err != nil {
 					return err
@@ -931,7 +1130,7 @@ func (mr *mdNodeRenderer) emitWrappedContinuation(fragments []inlineFragment, p 
 			}
 		}
 
-		prevEndsSentence = endsWithSentence(frag.text)
+		prevText = frag.text
 
 		if frag.hardBreak {
 			if err := mr.emit("  \n" + p); err != nil {
@@ -939,7 +1138,7 @@ func (mr *mdNodeRenderer) emitWrappedContinuation(fragments []inlineFragment, p 
 			}
 			col = len(p)
 			startOfLine = true
-			prevEndsSentence = false
+			prevText = ""
 		}
 	}
 
