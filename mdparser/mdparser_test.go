@@ -541,3 +541,12 @@ func TestLinkTextBreaksAcrossLines(t *testing.T) {
 		})
 	}
 }
+
+func TestDoubleSpacePreservedAcrossWrap(t *testing.T) {
+	input := "This version was created starting from extracting the text from the PDF of the\n2021 edition.  Many formatting errors were introduced in this process.  Some\nhave been fixed.\n"
+	want := "This version was created starting from extracting the text from the PDF of the\n2021 edition.  Many formatting errors were introduced in this process.  Some\nhave been fixed.\n"
+	got := roundTrip(t, input, 79)
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}

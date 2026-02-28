@@ -797,6 +797,25 @@ func (mr *mdNodeRenderer) collectInlineFragments(node gmast.Node, frags *[]inlin
 		case *gmast.Text:
 			val := string(n.Value(mr.source))
 			words, spacings, trailingSpaces := parseWordsWithSpacing(val)
+			// Goldmark sometimes splits text at multi-space
+			// positions, distributing the whitespace across two
+			// Text nodes (e.g. "process. " + " Some" for a
+			// source gap of two spaces).  When this node starts
+			// with leading whitespace, combine it with the
+			// previous fragment's trailing space count to recover
+			// the original gap width.
+			leadingSpaces := 0
+			for leadingSpaces < len(val) && (val[leadingSpaces] == ' ' || val[leadingSpaces] == '\t') {
+				leadingSpaces++
+			}
+			if leadingSpaces > 0 && len(*frags) > 0 {
+				prev := &(*frags)[len(*frags)-1]
+				prevTrailing := prev.spacesAfter
+				if prevTrailing < 0 {
+					prevTrailing = 0
+				}
+				prev.spacesAfter = min(prevTrailing+leadingSpaces, 2)
+			}
 			// If the raw text has no leading whitespace AND the
 			// previous sibling is an inline markup node OR a Text
 			// node with no trailing whitespace, glue the first word
