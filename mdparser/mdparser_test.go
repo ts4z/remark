@@ -338,6 +338,15 @@ func TestFootnoteReference(t *testing.T) {
 	}
 }
 
+func TestLinkFollowedByFootnote(t *testing.T) {
+	input := "[link text](https://example.com)[^1]\n\n[^1]: Footnote.\n"
+	want := "[link text](https://example.com)[^1]\n\n[^1]: Footnote.\n"
+	got := roundTrip(t, input, 79)
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 func TestNonLinkBrackets(t *testing.T) {
 	input := "See [Rocket J. Squirrel's Rules of Flight](https://example.com/).  [This link has been updated, as Rocky has left Wossamatta.edu.]\n"
 	want := "See [Rocket J. Squirrel's Rules of Flight](https://example.com/).  [This link\nhas been updated, as Rocky has left Wossamatta.edu.]\n"
@@ -548,5 +557,53 @@ func TestDoubleSpacePreservedAcrossWrap(t *testing.T) {
 	got := roundTrip(t, input, 79)
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestDefinitionList(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+		width int
+	}{
+		{
+			name:  "simple term and definition",
+			input: "Apple\n: A fruit.\n",
+			want:  "Apple\n: A fruit.\n",
+			width: 79,
+		},
+		{
+			name:  "multiple definitions",
+			input: "Big Bet\n: The larger bet in a limit game.\n: Collectively, pot-limit and no-limit games.\n",
+			want:  "Big Bet\n: The larger bet in a limit game.\n: Collectively, pot-limit and no-limit games.\n",
+			width: 79,
+		},
+		{
+			name:  "definition wraps",
+			input: "Big Bet\n: When playing a limit game, the larger bet in the structure, that is, $8 in a 4/8 game.\n",
+			want:  "Big Bet\n: When playing a limit game, the larger bet in the\n  structure, that is, $8 in a 4/8 game.\n",
+			width: 60,
+		},
+		{
+			name:  "multiple terms with blank line",
+			input: "Apple\n: A fruit.\n\nOrange\n: Another fruit.\n",
+			want:  "Apple\n: A fruit.\n\nOrange\n: Another fruit.\n",
+			width: 79,
+		},
+		{
+			name:  "definition with inline markup",
+			input: "Term\n: A *bold* definition.\n",
+			want:  "Term\n: A *bold* definition.\n",
+			width: 79,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := roundTrip(t, tc.input, tc.width)
+			if got != tc.want {
+				t.Errorf("got:\n%s\nwant:\n%s", got, tc.want)
+			}
+		})
 	}
 }

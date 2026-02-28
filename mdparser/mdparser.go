@@ -60,6 +60,7 @@ func (p *Parser) Parse(source []byte) (*Renderable, error) {
 		goldmark.WithExtensions(
 			extension.GFM,
 			extension.Footnote,
+			extension.DefinitionList,
 		),
 	)
 	reader := text.NewReader(source)
@@ -131,6 +132,11 @@ func (mr *mdNodeRenderer) RegisterFuncs(reg gmrenderer.NodeRendererFuncRegistere
 	// GFM extensions.
 	mr.register(reg, gmext.KindTable, mr.renderTable)
 	mr.register(reg, gmext.KindFootnoteList, mr.renderFootnoteList)
+
+	// Definition list extension.
+	mr.register(reg, gmext.KindDefinitionList, mr.renderDefinitionList)
+	mr.register(reg, gmext.KindDefinitionTerm, mr.renderDefinitionTerm)
+	mr.register(reg, gmext.KindDefinitionDescription, mr.renderDefinitionDescription)
 }
 
 func (mr *mdNodeRenderer) register(
@@ -554,6 +560,84 @@ func (mr *mdNodeRenderer) renderListItemFirstChild(node gmast.Node) error {
 	}
 }
 
+// ---------- DefinitionList ----------
+// Uses WalkContinue: the list is a container whose DefinitionTerm and
+// DefinitionDescription children are each handled by their own renderers.
+
+func (mr *mdNodeRenderer) renderDefinitionList(
+	w util.BufWriter, source []byte, n gmast.Node, entering bool,
+) (gmast.WalkStatus, error) {
+	if entering {
+		if err := mr.blankLine(); err != nil {
+			return gmast.WalkStop, err
+		}
+		mr.atBlankLine = true // suppress blank line before first child
+	}
+	return gmast.WalkContinue, nil
+}
+
+// renderDefinitionTerm renders the term (the word being defined).
+// Terms contain inline content and are emitted as a standalone line.
+func (mr *mdNodeRenderer) renderDefinitionTerm(
+	w util.BufWriter, source []byte, n gmast.Node, entering bool,
+) (gmast.WalkStatus, error) {
+	if !entering {
+		return gmast.WalkContinue, nil
+	}
+	// Blank line between successive term/description groups.
+	// The first term in the list gets its blank line from renderDefinitionList.
+	if err := mr.blankLine(); err != nil {
+		return gmast.WalkStop, err
+	}
+	mr.atBlankLine = false
+	frags := mr.inlineFragments(n)
+	if err := mr.emitWrapped(frags, mr.prefix()); err != nil {
+		return gmast.WalkStop, err
+	}
+	return gmast.WalkSkipChildren, nil
+}
+
+// renderDefinitionDescription renders a definition (`: ` prefixed description).
+// Each description is treated like a list item: the first block gets
+// emitted inline after the `: ` marker, subsequent blocks are indented.
+func (mr *mdNodeRenderer) renderDefinitionDescription(
+	w util.BufWriter, source []byte, n gmast.Node, entering bool,
+) (gmast.WalkStatus, error) {
+	if !entering {
+		return gmast.WalkContinue, nil
+	}
+	mr.atBlankLine = false
+
+	const marker = ": "
+	const indent = "  "
+
+	firstChild := true
+	for child := n.FirstChild(); child != nil; child = child.NextSibling() {
+		if firstChild {
+			if err := mr.emit(mr.prefix() + marker); err != nil {
+				return gmast.WalkStop, err
+			}
+			mr.pushPrefix(indent)
+			if err := mr.renderListItemFirstChild(child); err != nil {
+				return gmast.WalkStop, err
+			}
+		} else {
+			if err := mr.blankLine(); err != nil {
+				return gmast.WalkStop, err
+			}
+			if err := mr.walkNode(child); err != nil {
+				return gmast.WalkStop, err
+			}
+		}
+		firstChild = false
+	}
+
+	if !firstChild {
+		mr.popPrefix()
+	}
+	return gmast.WalkSkipChildren, nil
+}
+
 // ---------- HTMLBlock ----------
 
 func (mr *mdNodeRenderer) renderHTMLBlock(
@@ -950,9 +1034,11 @@ func (mr *mdNodeRenderer) prevTextHasNoTrailingSpace(n gmast.Node) bool {
 
 // addInlineFrag adds a markup fragment, gluing it to the previous fragment
 // if the previous sibling Text node has no trailing whitespace (meaning
-// the markup immediately follows text with no space, e.g. "word[^1]").
+// the markup immediately follows text with no space, e.g. "word[^1]"),
+// or if the previous sibling is another markup node (e.g. a link
+// immediately followed by a footnote: "[text](url)[^1]").
 func (mr *mdNodeRenderer) addInlineFrag(frags *[]inlineFragment, node gmast.Node, text string) {
-	if mr.prevTextHasNoTrailingSpace(node) && len(*frags) > 0 {
+	if (mr.prevTextHasNoTrailingSpace(node) || mr.prevIsMarkup(node)) && len(*frags) > 0 {
 		(*frags)[len(*frags)-1].text += text
 		(*frags)[len(*frags)-1].spacesAfter = -1
 	} else {
