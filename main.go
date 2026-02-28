@@ -47,7 +47,7 @@ func processFile(p *mdparser.Parser, filename string) error {
 	// Create temp file in the same directory so rename is atomic
 	// (same filesystem).
 	dir := filepath.Dir(filename)
-	out, err := os.CreateTemp(dir, ".mdindent-*")
+	out, err := os.CreateTemp(dir, "tmp.mdindent-*")
 	if err != nil {
 		return fmt.Errorf("creating temp file: %w", err)
 	}
