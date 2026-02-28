@@ -35,20 +35,20 @@ func WithWidth(width int) Option {
 // WithOneSpaceAfterSentence disables two spaces after sentence-ending punctuation.
 func WithOneSpaceAfterSentence(v bool) Option {
 	return func(p *Parser) {
-		p.twoSpacesAfterSentence = !v
+		p.oneSpaceAfterSentence = v
 	}
 }
 
 // Parser parses Markdown source into a Renderable using Goldmark.
 type Parser struct {
 	width                  int
-	twoSpacesAfterSentence bool
+	oneSpaceAfterSentence  bool
 }
 
 // NewParser creates a Parser with the given options.
 // Default width is 79.  Two spaces after sentences is the default.
 func NewParser(opts ...Option) *Parser {
-	p := &Parser{width: 79, twoSpacesAfterSentence: true}
+	p := &Parser{width: 79}
 	for _, o := range opts {
 		o(p)
 	}
@@ -66,30 +66,30 @@ func (p *Parser) Parse(source []byte) (mdio.Renderable, error) {
 	reader := text.NewReader(source)
 	doc := md.Parser().Parse(reader)
 	return &renderable{
-		doc:                    doc,
-		source:                 source,
-		width:                  p.width,
-		twoSpacesAfterSentence: p.twoSpacesAfterSentence,
+		doc:                   doc,
+		source:                source,
+		width:                 p.width,
+		oneSpaceAfterSentence: p.oneSpaceAfterSentence,
 	}, nil
 }
 
 // renderable holds a parsed Goldmark AST, the original source, and
 // cached rendering options.
 type renderable struct {
-	doc                    gmast.Node
-	source                 []byte
-	width                  int
-	twoSpacesAfterSentence bool
+	doc                   gmast.Node
+	source                []byte
+	width                 int
+	oneSpaceAfterSentence bool
 }
 
 // Render writes reformatted Markdown to w.
 // It creates a fresh Goldmark renderer with our NodeRenderer for each call.
 func (r *renderable) Render(w io.Writer) error {
 	nr := &mdNodeRenderer{
-		width:                  r.width,
-		source:                 r.source,
+		width:                 r.width,
+		source:                r.source,
 		atBlankLine:            true, // suppress blank line before first block
-		twoSpacesAfterSentence: r.twoSpacesAfterSentence,
+		oneSpaceAfterSentence: r.oneSpaceAfterSentence,
 	}
 	gmr := gmrenderer.NewRenderer(
 		gmrenderer.WithNodeRenderers(util.Prioritized(nr, 1000)),
@@ -106,7 +106,7 @@ type mdNodeRenderer struct {
 	source                 []byte
 	w                      util.BufWriter
 	atBlankLine            bool
-	twoSpacesAfterSentence bool     // use two spaces after sentence-ending punctuation
+	oneSpaceAfterSentence  bool     // one space after sentence-ending punctuation
 	prefixes               []string // prefix stack for nesting
 
 	// funcs stores registered render functions for manual sub-walks.
@@ -1075,8 +1075,8 @@ func startsWithUpper(s string) bool {
 // sentenceBreak returns the spacing to use between two fragments.
 // It returns "  " (double space) when the previous fragment ends a
 // sentence and the next fragment starts a new one.
-func sentenceBreak(prev, next string, twoSpacesAfterSentence bool) string {
-	if twoSpacesAfterSentence && endsWithSentence(prev) && !isKnownAbbreviation(prev) && startsWithUpper(next) {
+func sentenceBreak(prev, next string, oneSpaceAfterSentence bool) string {
+	if !oneSpaceAfterSentence && endsWithSentence(prev) && !isKnownAbbreviation(prev) && startsWithUpper(next) {
 		return "  "
 	}
 	return " "
@@ -1105,7 +1105,7 @@ func (mr *mdNodeRenderer) emitWrapped(fragments []inlineFragment, p string) erro
 			col += wordLen
 			startOfLine = false
 		} else {
-			sp := sentenceBreak(prevText, frag.text, mr.twoSpacesAfterSentence)
+			sp := sentenceBreak(prevText, frag.text, mr.oneSpaceAfterSentence)
 			if col+len(sp)+wordLen <= mr.width {
 				if err := mr.emit(sp + frag.text); err != nil {
 					return err
@@ -1155,7 +1155,7 @@ func (mr *mdNodeRenderer) emitWrappedContinuation(fragments []inlineFragment, p 
 			col += wordLen
 			startOfLine = false
 		} else {
-			sp := sentenceBreak(prevText, frag.text, mr.twoSpacesAfterSentence)
+			sp := sentenceBreak(prevText, frag.text, mr.oneSpaceAfterSentence)
 			if col+len(sp)+wordLen <= mr.width {
 				if err := mr.emit(sp + frag.text); err != nil {
 					return err
