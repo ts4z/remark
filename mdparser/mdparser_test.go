@@ -3,26 +3,24 @@ package mdparser
 import (
 	"bytes"
 	"testing"
-
-	"github.com/ts4z/mdindent/mdio"
 )
 
 // roundTrip parses source with width and renders back to a string.
 func roundTrip(t *testing.T, source string, width int) string {
 	t.Helper()
-	return roundTripOpts(t, source, mdio.RenderOptions{Width: width})
+	return roundTripWith(t, source, WithWidth(width))
 }
 
-// roundTripOpts parses source and renders with the given options.
-func roundTripOpts(t *testing.T, source string, opts mdio.RenderOptions) string {
+// roundTripWith parses source and renders with the given parser options.
+func roundTripWith(t *testing.T, source string, opts ...Option) string {
 	t.Helper()
-	p := &Parser{}
+	p := NewParser(opts...)
 	r, err := p.Parse([]byte(source))
 	if err != nil {
 		t.Fatalf("Parse error: %v", err)
 	}
 	var buf bytes.Buffer
-	if err := r.Render(&buf, opts); err != nil {
+	if err := r.Render(&buf); err != nil {
 		t.Fatalf("Render error: %v", err)
 	}
 	return buf.String()
@@ -392,10 +390,9 @@ func TestDoubleSpaceAfterSentence(t *testing.T) {
 			want:  "The value of x. is used here.\n",
 		},
 	}
-	opts := mdio.RenderOptions{Width: 79, TwoSpacesAfterSentence: true}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := roundTripOpts(t, tc.input, opts)
+			got := roundTrip(t, tc.input, 79)
 			if got != tc.want {
 				t.Errorf("got %q, want %q", got, tc.want)
 			}
@@ -403,10 +400,10 @@ func TestDoubleSpaceAfterSentence(t *testing.T) {
 	}
 }
 
-func TestDefaultSingleSpaceAfterSentence(t *testing.T) {
+func TestOneSpaceAfterSentence(t *testing.T) {
 	input := "First sentence. Second sentence.\n"
 	want := "First sentence. Second sentence.\n"
-	got := roundTrip(t, input, 79)
+	got := roundTripWith(t, input, WithWidth(79), WithOneSpaceAfterSentence(true))
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}

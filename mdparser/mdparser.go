@@ -22,8 +22,38 @@ import (
 	"github.com/yuin/goldmark/util"
 )
 
+// Option is a functional option for configuring a Parser.
+type Option func(*Parser)
+
+// WithWidth sets the line width for wrapping.
+func WithWidth(width int) Option {
+	return func(p *Parser) {
+		p.width = width
+	}
+}
+
+// WithOneSpaceAfterSentence disables two spaces after sentence-ending punctuation.
+func WithOneSpaceAfterSentence(v bool) Option {
+	return func(p *Parser) {
+		p.twoSpacesAfterSentence = !v
+	}
+}
+
 // Parser parses Markdown source into a Renderable using Goldmark.
-type Parser struct{}
+type Parser struct {
+	width                  int
+	twoSpacesAfterSentence bool
+}
+
+// NewParser creates a Parser with the given options.
+// Default width is 79.  Two spaces after sentences is the default.
+func NewParser(opts ...Option) *Parser {
+	p := &Parser{width: 79, twoSpacesAfterSentence: true}
+	for _, o := range opts {
+		o(p)
+	}
+	return p
+}
 
 // Parse parses source into a renderable Markdown document.
 func (p *Parser) Parse(source []byte) (mdio.Renderable, error) {
@@ -35,24 +65,31 @@ func (p *Parser) Parse(source []byte) (mdio.Renderable, error) {
 	)
 	reader := text.NewReader(source)
 	doc := md.Parser().Parse(reader)
-	return &renderable{doc: doc, source: source}, nil
+	return &renderable{
+		doc:                    doc,
+		source:                 source,
+		width:                  p.width,
+		twoSpacesAfterSentence: p.twoSpacesAfterSentence,
+	}, nil
 }
 
-// renderable holds a parsed Goldmark AST and the original source,
-// and can render the AST back to Markdown.
+// renderable holds a parsed Goldmark AST, the original source, and
+// cached rendering options.
 type renderable struct {
-	doc    gmast.Node
-	source []byte
+	doc                    gmast.Node
+	source                 []byte
+	width                  int
+	twoSpacesAfterSentence bool
 }
 
-// Render writes reformatted Markdown to w, wrapping paragraphs at width.
+// Render writes reformatted Markdown to w.
 // It creates a fresh Goldmark renderer with our NodeRenderer for each call.
-func (r *renderable) Render(w io.Writer, opts mdio.RenderOptions) error {
+func (r *renderable) Render(w io.Writer) error {
 	nr := &mdNodeRenderer{
-		width:                  opts.Width,
+		width:                  r.width,
 		source:                 r.source,
 		atBlankLine:            true, // suppress blank line before first block
-		twoSpacesAfterSentence: opts.TwoSpacesAfterSentence,
+		twoSpacesAfterSentence: r.twoSpacesAfterSentence,
 	}
 	gmr := gmrenderer.NewRenderer(
 		gmrenderer.WithNodeRenderers(util.Prioritized(nr, 1000)),
@@ -63,7 +100,9 @@ func (r *renderable) Render(w io.Writer, opts mdio.RenderOptions) error {
 // mdNodeRenderer implements goldmark's renderer.NodeRenderer interface,
 // rendering AST nodes back to formatted Markdown with word wrapping.
 type mdNodeRenderer struct {
-	width                  int
+	width int
+
+	// Rendering state
 	source                 []byte
 	w                      util.BufWriter
 	atBlankLine            bool

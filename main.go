@@ -8,28 +8,26 @@ import (
 
 	"github.com/spf13/pflag"
 
-	"github.com/ts4z/mdindent/mdio"
 	"github.com/ts4z/mdindent/mdparser"
 )
 
 var (
 	width                 int
-	twoSpacesAft
-	erSentence bool
+	oneSpaceAfterSentence bool
 )
 
 func initFlags() {
 	pflag.IntVarP(&width, "width", "w", 79, "line width for output")
-	pflag.BoolVarP(&twoSpacesAfterSentence, "two-spaces", "2", false, "two spaces after sentence-ending punctuation")
+	pflag.BoolVarP(&oneSpaceAfterSentence, "one-space-after-sentence", "1", false, "one space after sentence-ending punctuation (default is two)")
 }
 
 // process parses source with the given Parser and renders the result to w.
-func process(p Parser, source []byte, w io.Writer, opts mdio.RenderOptions) error {
+func process(p Parser, source []byte, w io.Writer) error {
 	r, err := p.Parse(source)
 	if err != nil {
 		return err
 	}
-	return r.Render(w, opts)
+	return r.Render(w)
 }
 
 // processFile reads a file, processes it, and writes the result back
@@ -49,29 +47,28 @@ func processFile(p Parser, filename string) error {
 	// Create temp file in the same directory so rename is atomic
 	// (same filesystem).
 	dir := filepath.Dir(filename)
-	tmp, err := os.CreateTemp(dir, ".mdindent-*")
+	out, err := os.CreateTemp(dir, ".mdindent-*")
 	if err != nil {
 		return fmt.Errorf("creating temp file: %w", err)
 	}
-	tmpName := tmp.Name()
+	tmpName := out.Name()
 	defer func() {
 		if tmpName != "" {
 			os.Remove(tmpName)
 		}
 	}()
 
-	if err := tmp.Chmod(info.Mode()); err != nil {
-		tmp.Close()
+	if err := out.Chmod(info.Mode()); err != nil {
+		out.Close()
 		return fmt.Errorf("chmod temp file: %w", err)
 	}
 
-	opts := mdio.RenderOptions{Width: width, TwoSpacesAfterSentence: twoSpacesAferSentence}
-	if err := process(p, source, tmp, opts); err != nil {
-		tmp.Close()
+	if err := process(p, source, out); err != nil {
+		out.Close()
 		return fmt.Errorf("processing %s: %w", filename, err)
 	}
 
-	if err := tmp.Close(); err != nil {
+	if err := out.Close(); err != nil {
 		return fmt.Errorf("closing temp file: %w", err)
 	}
 
@@ -85,7 +82,10 @@ func processFile(p Parser, filename string) error {
 func run() error {
 	pflag.Parse()
 
-	p := &mdparser.Parser{}
+	p := mdparser.NewParser(
+		mdparser.WithWidth(width),
+		mdparser.WithOneSpaceAfterSentence(oneSpaceAfterSentence),
+	)
 
 	args := pflag.Args()
 	if len(args) == 0 {
@@ -93,8 +93,7 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("reading stdin: %w", err)
 		}
-		opts := mdio.RenderOptions{Width: width, TwoSpacesAfterSentence: twoSpacesAferSentence}
-		return process(p, source, os.Stdout, opts)
+		return process(p, source, os.Stdout)
 	}
 
 	var firstErr error

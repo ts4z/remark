@@ -14,8 +14,8 @@ type renderable struct {
 	source []byte
 }
 
-// Render writes the raw source to w, ignoring options.
-func (r *renderable) Render(w io.Writer, opts mdio.RenderOptions) error {
+// Render writes the raw source to w unchanged.
+func (r *renderable) Render(w io.Writer) error {
 	_, err := w.Write(r.source)
 	return err
 }
