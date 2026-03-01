@@ -30,8 +30,8 @@ directory full of files, and it will try and not change anything.
 ### Emacs compatibility
 
 The maintainer is a longtime Emacs addict, so this is mostly compatible with
-Emacs' `fill-paragraph` and Emacs' `markdown-mode`.  Our treatment of tables
-is slightly different, because we will center-justify text within a table column
+Emacs' `fill-paragraph` and Emacs' `markdown-mode`.  Our treatment of tables is
+slightly different, because we will center-justify text within a table column
 based on the header.  I think Emacs should do this, too, so I haven't changed
 the behavior.
 
