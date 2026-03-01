@@ -1,4 +1,4 @@
-module github.com/ts4z/mdindent
+module github.com/ts4z/remark
 
 go 1.25.0
 

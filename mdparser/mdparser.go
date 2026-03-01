@@ -782,18 +782,20 @@ func (mr *mdNodeRenderer) emitTableSeparator(
 		if i < len(alignments) {
 			align = alignments[i]
 		}
+		// Fill the full column slot (w+2) with dashes, Emacs-style.
+		fw := w + 2
 		var sep string
 		switch align {
 		case gmext.AlignLeft:
-			sep = ":" + strings.Repeat("-", w-1)
+			sep = ":" + strings.Repeat("-", fw-1)
 		case gmext.AlignRight:
-			sep = strings.Repeat("-", w-1) + ":"
+			sep = strings.Repeat("-", fw-1) + ":"
 		case gmext.AlignCenter:
-			sep = ":" + strings.Repeat("-", w-2) + ":"
+			sep = ":" + strings.Repeat("-", fw-2) + ":"
 		default:
-			sep = strings.Repeat("-", w)
+			sep = strings.Repeat("-", fw)
 		}
-		if err := mr.emit(" " + sep + " |"); err != nil {
+		if err := mr.emit(sep + "|"); err != nil {
 			return err
 		}
 	}

@@ -313,7 +313,7 @@ func TestTaskList(t *testing.T) {
 
 func TestSimpleTable(t *testing.T) {
 	input := "| A | B |\n| --- | --- |\n| 1 | 2 |\n"
-	want := "| A   | B   |\n| --- | --- |\n| 1   | 2   |\n"
+	want := "| A   | B   |\n|-----|-----|\n| 1   | 2   |\n"
 	got := roundTrip(t, input, 79)
 	if got != want {
 		t.Errorf("got:\n%s\nwant:\n%s", got, want)
@@ -322,7 +322,7 @@ func TestSimpleTable(t *testing.T) {
 
 func TestTableAlignment(t *testing.T) {
 	input := "| Left | Center | Right |\n| :--- | :---: | ---: |\n| a | b | c |\n"
-	want := "| Left | Center | Right |\n| :--- | :----: | ----: |\n| a    |   b    |     c |\n"
+	want := "| Left | Center | Right |\n|:-----|:------:|------:|\n| a    |   b    |     c |\n"
 	got := roundTrip(t, input, 79)
 	if got != want {
 		t.Errorf("got:\n%s\nwant:\n%s", got, want)
@@ -414,8 +414,8 @@ func TestDoubleSpaceAfterSentence(t *testing.T) {
 		},
 		{
 			name:  "e.g. preserves single space",
-			input: "Use a tool (e.g. mdindent) for this.\n",
-			want:  "Use a tool (e.g. mdindent) for this.\n",
+			input: "Use a tool (e.g. remark) for this.\n",
+			want:  "Use a tool (e.g. remark) for this.\n",
 		},
 		{
 			name:  "J.C.R. preserves single space",

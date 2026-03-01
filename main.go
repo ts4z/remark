@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/pflag"
 
-	"github.com/ts4z/mdindent/mdparser"
+	"github.com/ts4z/remark/mdparser"
 )
 
 var (
@@ -47,7 +47,7 @@ func processFile(p *mdparser.Parser, filename string) error {
 	// Create temp file in the same directory so rename is atomic
 	// (same filesystem).
 	dir := filepath.Dir(filename)
-	out, err := os.CreateTemp(dir, "tmp.mdindent-*")
+	out, err := os.CreateTemp(dir, "tmp.remark-*")
 	if err != nil {
 		return fmt.Errorf("creating temp file: %w", err)
 	}
@@ -99,7 +99,7 @@ func run() error {
 	var firstErr error
 	for _, filename := range args {
 		if err := processFile(p, filename); err != nil {
-			fmt.Fprintf(os.Stderr, "mdindent: %v\n", err)
+			fmt.Fprintf(os.Stderr, "remark: %v\n", err)
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -114,7 +114,7 @@ func main() {
 	if err := run(); err != nil {
 		// For stdin mode, the error hasn't been printed yet.
 		if pflag.NArg() == 0 {
-			fmt.Fprintf(os.Stderr, "mdindent: %v\n", err)
+			fmt.Fprintf(os.Stderr, "remark: %v\n", err)
 		}
 		os.Exit(1)
 	}
