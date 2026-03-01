@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -31,14 +32,26 @@ func process(p *mdparser.Parser, source []byte, w io.Writer) error {
 }
 
 // processFile reads a file, processes it, and writes the result back
-// atomically (via temp file + rename).
+// atomically (via temp file + rename).  If the output is identical to
+// the input, the file is left untouched.
 func processFile(p *mdparser.Parser, filename string) error {
 	source, err := os.ReadFile(filename)
 	if err != nil {
 		return fmt.Errorf("reading %s: %w", filename, err)
 	}
 
-	// Stat before processing so we can preserve permissions.
+	// Render into memory so we can compare before writing.
+	var buf bytes.Buffer
+	if err := process(p, source, &buf); err != nil {
+		return fmt.Errorf("processing %s: %w", filename, err)
+	}
+
+	// If nothing changed, skip the write entirely.
+	if bytes.Equal(source, buf.Bytes()) {
+		return nil
+	}
+
+	// Stat before writing so we can preserve permissions.
 	info, err := os.Stat(filename)
 	if err != nil {
 		return fmt.Errorf("stat %s: %w", filename, err)
@@ -63,9 +76,9 @@ func processFile(p *mdparser.Parser, filename string) error {
 		return fmt.Errorf("chmod temp file: %w", err)
 	}
 
-	if err := process(p, source, out); err != nil {
+	if _, err := out.Write(buf.Bytes()); err != nil {
 		out.Close()
-		return fmt.Errorf("processing %s: %w", filename, err)
+		return fmt.Errorf("writing %s: %w", filename, err)
 	}
 
 	if err := out.Close(); err != nil {

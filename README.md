@@ -18,9 +18,14 @@ reasonably fast and passes tests.
 
 This is a matter of opinion.  This utility has one, and mostly only one.
 
-The style here is consistent and reasonable, but somewhat accidental.  Simple
-text should be consistently line-wrapped.  Lists will be indented consistently
-and numbered consistently.  Tables will be rendered neatly.
+### Leave it alone
+
+By default, our philosophy is to pass through the input with as little
+re-indenting as possible.  Markdown isn't very flexible here, in that it
+doesn't allow comments or other metadata.
+
+This is intended for easy `diff(1)`-ability.  You can run `remark` on a
+directory full of files, and it will try and not change anything.
 
 ### Emacs compatibility
 
@@ -34,14 +39,14 @@ the behavior.
 
 Line length is configurable with the `-w` switch.
 
-### two spaces at the end of a sentence
+### two spaces at the end of a sentence (maybe)
 
-Since Markdown is usually presented in a fixed-width font, I prefer two spaces
-at the end of a sentence.  (If you render the text as HTML or LaTeX, render it
-however you think looks best.)  But I have discovered sometimes, there is only
-a single space at the end of a sentence. `remark` tries to have it both ways.
-It tries to preserve what is there, but in situations where a line ends in
-punctuation, the next re-wrap will have some other answer.  C'est la vie.  The
-implemented behavior tries to respect the text, but with only a modern amount
-of hackery.  Use the `-1` flag if you want one space when `remark` has to
-decide.
+According to the [Leave it alone](#leave-it-alone) rule, we try not to change
+spacing at the end of a sentence.  Whatever you have, `remark` will attempt to
+preserve.  Sometimes it is unclear, however, such as at the end of a line.
+Since Markdown "source" is almost always rendered in fixed-width text, and the
+maintainer learned to type in the '80s, the default is to put two spaces at the
+end of a sentence (if we can correctly automatically identify the end of a
+sentence).
+
+If you prefer one space in these situations, use the `-1` switch.

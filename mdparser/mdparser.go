@@ -191,6 +191,34 @@ func (mr *mdNodeRenderer) blankLine() error {
 	return nil
 }
 
+// blankLineBefore reports whether the source contains a blank line
+// immediately before the line that contains (or starts at) byte offset pos.
+// This is used to preserve the original inter-item spacing of lists.
+func (mr *mdNodeRenderer) blankLineBefore(pos int) bool {
+	// Find the start of the line containing pos.
+	lineStart := pos
+	for lineStart > 0 && mr.source[lineStart-1] != '\n' {
+		lineStart--
+	}
+	if lineStart == 0 {
+		return false // first line of the document
+	}
+	// lineStart-1 is the '\n' ending the previous line.
+	prevEnd := lineStart - 1
+	// Find where that previous line begins.
+	prevStart := prevEnd
+	for prevStart > 0 && mr.source[prevStart-1] != '\n' {
+		prevStart--
+	}
+	// Check whether source[prevStart:prevEnd] is all whitespace (blank line).
+	for i := prevStart; i < prevEnd; i++ {
+		if mr.source[i] != ' ' && mr.source[i] != '\t' && mr.source[i] != '\r' {
+			return false
+		}
+	}
+	return true
+}
+
 // ---------- Document ----------
 
 func (mr *mdNodeRenderer) renderDocument(
@@ -495,7 +523,7 @@ func (mr *mdNodeRenderer) renderList(
 			continue
 		}
 
-		if !first && !list.IsTight {
+		if !first && mr.blankLineBefore(mr.blockStartPos(child)) {
 			if err := mr.blankLine(); err != nil {
 				return gmast.WalkStop, err
 			}

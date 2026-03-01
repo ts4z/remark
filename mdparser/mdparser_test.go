@@ -607,3 +607,65 @@ func TestDefinitionList(t *testing.T) {
 		})
 	}
 }
+
+func TestListSpacingPreserved(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+		width int
+	}{
+		{
+			name: "tight list stays tight",
+			input: "1. An odd chip is broken down into the smallest denomination in play.\n" +
+				"2. No player may receive more than one off chip.\n" +
+				"3. When two or more hands tie, an odd chip or chips are awarded as follows:\n" +
+				"\n" +
+				"   1. In games with a button, the first hand clockwise from the button (i.e.\n" +
+				"      \"worst position\") gets the odd chip;\n" +
+				"   2. In [Stud](stud.md) games, the odd chip will be given to the hand with the\n" +
+				"      highest card by suit, where the ordering of suits is spades, hearts,\n" +
+				"      diamonds, clubs;\n" +
+				"   3. In High-Low split games, the high hand receives the odd chip in a split\n" +
+				"      between the high and low hands.\n",
+			want: "1. An odd chip is broken down into the smallest denomination in play.\n" +
+				"2. No player may receive more than one off chip.\n" +
+				"3. When two or more hands tie, an odd chip or chips are awarded as follows:\n" +
+				"\n" +
+				"   1. In games with a button, the first hand clockwise from the button (i.e.\n" +
+				"      \"worst position\") gets the odd chip;\n" +
+				"   2. In [Stud](stud.md) games, the odd chip will be given to the hand with the\n" +
+				"      highest card by suit, where the ordering of suits is spades, hearts,\n" +
+				"      diamonds, clubs;\n" +
+				"   3. In High-Low split games, the high hand receives the odd chip in a split\n" +
+				"      between the high and low hands.\n",
+			width: 79,
+		},
+		{
+			name: "loose list stays loose",
+			input: "- In split games that involve a five-card hand and a four-card hand, the\n" +
+				"  five-card hand is treated as the high hand.\n" +
+				"\n" +
+				"- In split pot games that involve a draw hand, the draw hand is treated as\n" +
+				"  the high hand.\n" +
+				"\n" +
+				"- In Sohe, the Omaha hand is treated as the high hand.\n",
+			want: "- In split games that involve a five-card hand and a four-card hand, the\n" +
+				"  five-card hand is treated as the high hand.\n" +
+				"\n" +
+				"- In split pot games that involve a draw hand, the draw hand is treated as the\n" +
+				"  high hand.\n" +
+				"\n" +
+				"- In Sohe, the Omaha hand is treated as the high hand.\n",
+			width: 79,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := roundTrip(t, tc.input, tc.width)
+			if got != tc.want {
+				t.Errorf("got:\n%s\nwant:\n%s", got, tc.want)
+			}
+		})
+	}
+}
