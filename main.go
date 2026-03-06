@@ -15,11 +15,15 @@ import (
 var (
 	width                 int
 	oneSpaceAfterSentence bool
+	noFrontmatter         bool
+	quiet                 bool
 )
 
 func initFlags() {
 	pflag.IntVarP(&width, "width", "w", 79, "line width for output")
 	pflag.BoolVarP(&oneSpaceAfterSentence, "one-space-after-sentence", "1", false, "one space after sentence-ending punctuation (default is two)")
+	pflag.BoolVar(&noFrontmatter, "no-frontmatter", false, "do not detect or preserve Hugo-style frontmatter")
+	pflag.BoolVarP(&quiet, "quiet", "q", false, "suppress warnings")
 }
 
 // process parses source with the given Parser and renders the result to w.
@@ -95,9 +99,18 @@ func processFile(p *mdparser.Parser, filename string) error {
 func run() error {
 	pflag.Parse()
 
+	var warn mdparser.WarnFunc
+	if !quiet {
+		warn = func(format string, args ...interface{}) {
+			fmt.Fprintf(os.Stderr, "remark: warning: "+format+"\n", args...)
+		}
+	}
+
 	p := mdparser.NewParser(
 		mdparser.WithWidth(width),
 		mdparser.WithOneSpaceAfterSentence(oneSpaceAfterSentence),
+		mdparser.WithFrontmatter(!noFrontmatter),
+		mdparser.WithWarnFunc(warn),
 	)
 
 	args := pflag.Args()

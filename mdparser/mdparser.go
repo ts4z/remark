@@ -38,16 +38,37 @@ func WithOneSpaceAfterSentence(v bool) Option {
 	}
 }
 
+// WithFrontmatter controls whether Hugo-style frontmatter is detected and
+// preserved.  The default is true.
+func WithFrontmatter(v bool) Option {
+	return func(p *Parser) {
+		p.frontmatter = v
+	}
+}
+
+// WarnFunc is a callback used to emit warnings.
+type WarnFunc func(format string, args ...interface{})
+
+// WithWarnFunc sets a warning callback.  If nil, warnings are suppressed.
+func WithWarnFunc(f WarnFunc) Option {
+	return func(p *Parser) {
+		p.warn = f
+	}
+}
+
 // Parser parses Markdown source into a Renderable using Goldmark.
 type Parser struct {
 	width                 int
 	oneSpaceAfterSentence bool
+	frontmatter           bool
+	warn                  WarnFunc
 }
 
 // NewParser creates a Parser with the given options.
 // Default width is 79.  Two spaces after sentences is the default.
+// Frontmatter detection is enabled by default.
 func NewParser(opts ...Option) *Parser {
-	p := &Parser{width: 79}
+	p := &Parser{width: 79, frontmatter: true}
 	for _, o := range opts {
 		o(p)
 	}
@@ -56,6 +77,22 @@ func NewParser(opts ...Option) *Parser {
 
 // Parse parses source into a renderable Markdown document.
 func (p *Parser) Parse(source []byte) (*Renderable, error) {
+	var fmBytes []byte
+	body := source
+
+	detected := detectFrontmatterFormat(source)
+	if p.frontmatter && detected != fmNone {
+		var err error
+		fmBytes, body, err = extractFrontmatter(source)
+		if err != nil {
+			return nil, err
+		}
+	} else if !p.frontmatter && detected != fmNone {
+		if p.warn != nil {
+			p.warn("frontmatter detected but --no-frontmatter is set; treating as plain markdown")
+		}
+	}
+
 	md := goldmark.New(
 		goldmark.WithExtensions(
 			extension.GFM,
@@ -63,13 +100,14 @@ func (p *Parser) Parse(source []byte) (*Renderable, error) {
 			extension.DefinitionList,
 		),
 	)
-	reader := text.NewReader(source)
+	reader := text.NewReader(body)
 	doc := md.Parser().Parse(reader)
 	return &Renderable{
 		doc:                   doc,
-		source:                source,
+		source:                body,
 		width:                 p.width,
 		oneSpaceAfterSentence: p.oneSpaceAfterSentence,
+		frontmatter:           fmBytes,
 	}, nil
 }
 
@@ -80,15 +118,22 @@ type Renderable struct {
 	source                []byte
 	width                 int
 	oneSpaceAfterSentence bool
+	frontmatter           []byte // formatted frontmatter to prepend
 }
 
 // Render writes reformatted Markdown to w.
 // It creates a fresh Goldmark renderer with our NodeRenderer for each call.
 func (r *Renderable) Render(w io.Writer) error {
+	hasFM := len(r.frontmatter) > 0
+	if hasFM {
+		if _, err := w.Write(r.frontmatter); err != nil {
+			return err
+		}
+	}
 	nr := &mdNodeRenderer{
 		width:                 r.width,
 		source:                r.source,
-		atBlankLine:           true, // suppress blank line before first block
+		atBlankLine:           !hasFM, // after frontmatter, emit separator blank line
 		oneSpaceAfterSentence: r.oneSpaceAfterSentence,
 	}
 	gmr := gmrenderer.NewRenderer(
@@ -1182,7 +1227,7 @@ func sentenceBreak(prev string, oneSpaceAfterSentence bool) string {
 // looksLikeInitial returns true if the text looks like a personal initial
 // such as "J." or "**J.**" — a single letter followed by a period,
 // possibly surrounded by markup characters and trailing closers.
-// Single-letter initials are never sentence endings.
+// Single-letter initials are probably not sentence-ending.
 func looksLikeInitial(s string) bool {
 	// Strip trailing closers and markup.
 	end := len(s)
