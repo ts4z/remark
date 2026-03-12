@@ -12,6 +12,10 @@ import (
 	"github.com/ts4z/remark/mdparser"
 )
 
+const (
+	defaultWidth = 79
+)
+
 var (
 	width                 int
 	oneSpaceAfterSentence bool
@@ -20,10 +24,38 @@ var (
 )
 
 func initFlags() {
-	pflag.IntVarP(&width, "width", "w", 79, "line width for output")
-	pflag.BoolVarP(&oneSpaceAfterSentence, "one-space-after-sentence", "1", false, "one space after sentence-ending punctuation (default is two)")
-	pflag.BoolVar(&noFrontmatter, "no-frontmatter", false, "do not detect or preserve Hugo-style frontmatter")
-	pflag.BoolVarP(&quiet, "quiet", "q", false, "suppress warnings")
+	pflag.Usage = func() {
+		fmt.Fprintf(os.Stderr, `remark: *re*indent *mark*down
+
+Usage: %s [OPTIONS] [FILES...]
+
+If no files are supplied, remark will operate on stdin/stdout.
+
+`,
+			filepath.Base(os.Args[0]))
+		pflag.PrintDefaults()
+		fmt.Fprintf(os.Stderr, `
+
+Note on inter-sentence spacing: Space is generally preserved.  The -1 switch
+controls only what happens when it isn't.  Consider re-wrapping a paragraph
+where one line ends in a period.  In this case, remark has to insert space
+between the end of this sentence and the next sentence.  It can either add two
+spaces, as typists were taught to for many years; or it can add one, as modern
+style manuals suggest.  End-of-sentence detection is also heuristic; that is,
+it is sometimes wrong.
+
+By default, remark tries to detect (and preserve) frontmatter.  If the
+--no-frontmatter switch is given, the whole file will be blindly parsed as
+Markdown.
+
+remark supports all "standard" Markdown, plus GFM tables, footnotes, and
+definition lists.
+`)
+	}
+	pflag.IntVarP(&width, "width", "w", defaultWidth, "line width for output")
+	pflag.BoolVarP(&oneSpaceAfterSentence, "one-space-after-sentence", "1", false, "put one space between sentences (default two)*")
+	pflag.BoolVar(&noFrontmatter, "no-frontmatter", false, "don't look for frontmatter")
+	pflag.BoolVarP(&quiet, "quiet", "q", false, "less loquacious, more laconic")
 }
 
 // process parses source with the given Parser and renders the result to w.
