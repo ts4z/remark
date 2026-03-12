@@ -139,7 +139,10 @@ func (r *Renderable) Render(w io.Writer) error {
 	gmr := gmrenderer.NewRenderer(
 		gmrenderer.WithNodeRenderers(util.Prioritized(nr, 1000)),
 	)
-	return gmr.Render(w, r.source, r.doc)
+	if err := gmr.Render(w, r.source, r.doc); err != nil {
+		return err
+	}
+	return nr.err
 }
 
 // mdNodeRenderer implements goldmark's renderer.NodeRenderer interface,
@@ -150,6 +153,8 @@ type mdNodeRenderer struct {
 	// Rendering state
 	source                []byte
 	w                     util.BufWriter
+	col                   int      // current column position in output
+	err                   error    // first write error; emit becomes a no-op once set
 	atBlankLine           bool
 	oneSpaceAfterSentence bool     // one space after sentence-ending punctuation
 	prefixes              []string // prefix stack for nesting
@@ -196,8 +201,8 @@ func (mr *mdNodeRenderer) register(
 // walkNode dispatches a single node (and its subtree) through the
 // registered render functions.  Used for manual sub-walks when a parent
 // handler returns WalkSkipChildren.
-func (mr *mdNodeRenderer) walkNode(node gmast.Node) error {
-	return gmast.Walk(node, func(n gmast.Node, entering bool) (gmast.WalkStatus, error) {
+func (mr *mdNodeRenderer) walkNode(node gmast.Node) {
+	gmast.Walk(node, func(n gmast.Node, entering bool) (gmast.WalkStatus, error) {
 		if f := mr.funcs[n.Kind()]; f != nil {
 			return f(mr.w, mr.source, n, entering)
 		}
@@ -223,17 +228,26 @@ func (mr *mdNodeRenderer) popPrefix() {
 
 // ---------- output helpers ----------
 
-func (mr *mdNodeRenderer) emit(s string) error {
-	_, err := mr.w.WriteString(s)
-	return err
+func (mr *mdNodeRenderer) emit(s string) {
+	if mr.err != nil {
+		return
+	}
+	_, mr.err = mr.w.WriteString(s)
+	if mr.err != nil {
+		return
+	}
+	if i := strings.LastIndex(s, "\n"); i >= 0 {
+		mr.col = len(s) - i - 1
+	} else {
+		mr.col += len(s)
+	}
 }
 
-func (mr *mdNodeRenderer) blankLine() error {
+func (mr *mdNodeRenderer) blankLine() {
 	if !mr.atBlankLine {
 		mr.atBlankLine = true
-		return mr.emit("\n")
+		mr.emit("\n")
 	}
-	return nil
 }
 
 // blankLineBefore reports whether the source contains a blank line
@@ -326,26 +340,18 @@ func (mr *mdNodeRenderer) renderDocument(
 			}
 			renderedFootnotes[fn.Index] = true
 			if !first {
-				if err := mr.blankLine(); err != nil {
-					return gmast.WalkStop, err
-				}
+				mr.blankLine()
 			}
 			first = false
-			if err := mr.renderFootnoteInner(fn); err != nil {
-				return gmast.WalkStop, err
-			}
+			mr.renderFootnoteInner(fn)
 		} else {
 			block := blocks[bi]
 			bi++
 			if !first {
-				if err := mr.blankLine(); err != nil {
-					return gmast.WalkStop, err
-				}
+				mr.blankLine()
 			}
 			first = false
-			if err := mr.walkNode(block.node); err != nil {
-				return gmast.WalkStop, err
-			}
+			mr.walkNode(block.node)
 		}
 	}
 
@@ -411,16 +417,12 @@ func (mr *mdNodeRenderer) renderHeading(
 	if !entering {
 		return gmast.WalkContinue, nil
 	}
-	if err := mr.blankLine(); err != nil {
-		return gmast.WalkStop, err
-	}
+	mr.blankLine()
 	mr.atBlankLine = false
 	heading := n.(*gmast.Heading)
 	hashes := strings.Repeat("#", heading.Level)
 	text := mr.inlineText(n)
-	if err := mr.emit(mr.prefix() + hashes + " " + text + "\n"); err != nil {
-		return gmast.WalkStop, err
-	}
+	mr.emit(mr.prefix() + hashes + " " + text + "\n")
 	return gmast.WalkSkipChildren, nil
 }
 
@@ -432,14 +434,10 @@ func (mr *mdNodeRenderer) renderParagraph(
 	if !entering {
 		return gmast.WalkContinue, nil
 	}
-	if err := mr.blankLine(); err != nil {
-		return gmast.WalkStop, err
-	}
+	mr.blankLine()
 	mr.atBlankLine = false
 	frags := mr.inlineFragments(n)
-	if err := mr.emitWrapped(frags, mr.prefix()); err != nil {
-		return gmast.WalkStop, err
-	}
+	mr.emitWrapped(frags, mr.prefix())
 	return gmast.WalkSkipChildren, nil
 }
 
@@ -451,13 +449,9 @@ func (mr *mdNodeRenderer) renderThematicBreak(
 	if !entering {
 		return gmast.WalkContinue, nil
 	}
-	if err := mr.blankLine(); err != nil {
-		return gmast.WalkStop, err
-	}
+	mr.blankLine()
 	mr.atBlankLine = false
-	if err := mr.emit(mr.prefix() + "---\n"); err != nil {
-		return gmast.WalkStop, err
-	}
+	mr.emit(mr.prefix() + "---\n")
 	return gmast.WalkContinue, nil
 }
 
@@ -469,9 +463,7 @@ func (mr *mdNodeRenderer) renderFencedCodeBlock(
 	if !entering {
 		return gmast.WalkContinue, nil
 	}
-	if err := mr.blankLine(); err != nil {
-		return gmast.WalkStop, err
-	}
+	mr.blankLine()
 	mr.atBlankLine = false
 	fcb := n.(*gmast.FencedCodeBlock)
 	p := mr.prefix()
@@ -482,19 +474,13 @@ func (mr *mdNodeRenderer) renderFencedCodeBlock(
 			lang = lang[:idx]
 		}
 	}
-	if err := mr.emit(p + "```" + lang + "\n"); err != nil {
-		return gmast.WalkStop, err
-	}
+	mr.emit(p + "```" + lang + "\n")
 	lines := fcb.Lines()
 	for i := 0; i < lines.Len(); i++ {
 		seg := lines.At(i)
-		if err := mr.emit(p + string(seg.Value(source))); err != nil {
-			return gmast.WalkStop, err
-		}
+		mr.emit(p + string(seg.Value(source)))
 	}
-	if err := mr.emit(p + "```\n"); err != nil {
-		return gmast.WalkStop, err
-	}
+	mr.emit(p + "```\n")
 	return gmast.WalkSkipChildren, nil
 }
 
@@ -506,18 +492,14 @@ func (mr *mdNodeRenderer) renderCodeBlock(
 	if !entering {
 		return gmast.WalkContinue, nil
 	}
-	if err := mr.blankLine(); err != nil {
-		return gmast.WalkStop, err
-	}
+	mr.blankLine()
 	mr.atBlankLine = false
 	cb := n.(*gmast.CodeBlock)
 	p := mr.prefix()
 	lines := cb.Lines()
 	for i := 0; i < lines.Len(); i++ {
 		seg := lines.At(i)
-		if err := mr.emit(p + "    " + string(seg.Value(source))); err != nil {
-			return gmast.WalkStop, err
-		}
+		mr.emit(p + "    " + string(seg.Value(source)))
 	}
 	return gmast.WalkSkipChildren, nil
 }
@@ -530,9 +512,7 @@ func (mr *mdNodeRenderer) renderBlockquote(
 	w util.BufWriter, source []byte, n gmast.Node, entering bool,
 ) (gmast.WalkStatus, error) {
 	if entering {
-		if err := mr.blankLine(); err != nil {
-			return gmast.WalkStop, err
-		}
+		mr.blankLine()
 		mr.pushPrefix("> ")
 		mr.atBlankLine = true // suppress blank line before first child
 	} else {
@@ -551,9 +531,7 @@ func (mr *mdNodeRenderer) renderList(
 	if !entering {
 		return gmast.WalkContinue, nil
 	}
-	if err := mr.blankLine(); err != nil {
-		return gmast.WalkStop, err
-	}
+	mr.blankLine()
 	mr.atBlankLine = false
 
 	list := n.(*gmast.List)
@@ -569,9 +547,7 @@ func (mr *mdNodeRenderer) renderList(
 		}
 
 		if !first && mr.blankLineBefore(mr.blockStartPos(child)) {
-			if err := mr.blankLine(); err != nil {
-				return gmast.WalkStop, err
-			}
+			mr.blankLine()
 		}
 		first = false
 
@@ -588,23 +564,15 @@ func (mr *mdNodeRenderer) renderList(
 		firstChild := true
 		for itemChild := child.FirstChild(); itemChild != nil; itemChild = itemChild.NextSibling() {
 			if !firstChild {
-				if err := mr.blankLine(); err != nil {
-					return gmast.WalkStop, err
-				}
+				mr.blankLine()
 			}
 
 			if firstChild {
-				if err := mr.emit(mr.prefix() + bullet); err != nil {
-					return gmast.WalkStop, err
-				}
+				mr.emit(mr.prefix() + bullet)
 				mr.pushPrefix(indent)
-				if err := mr.renderListItemFirstChild(itemChild); err != nil {
-					return gmast.WalkStop, err
-				}
+				mr.renderListItemFirstChild(itemChild)
 			} else {
-				if err := mr.walkNode(itemChild); err != nil {
-					return gmast.WalkStop, err
-				}
+				mr.walkNode(itemChild)
 			}
 			firstChild = false
 		}
@@ -618,18 +586,16 @@ func (mr *mdNodeRenderer) renderList(
 
 // renderListItemFirstChild renders the first block of a list item,
 // where the bullet has already been emitted on the current line.
-func (mr *mdNodeRenderer) renderListItemFirstChild(node gmast.Node) error {
+func (mr *mdNodeRenderer) renderListItemFirstChild(node gmast.Node) {
 	mr.atBlankLine = false
 	switch node.(type) {
 	case *gmast.Paragraph, *gmast.TextBlock:
 		frags := mr.inlineFragments(node)
-		return mr.emitWrappedContinuation(frags, mr.prefix())
+		mr.emitWrappedContinuation(frags, mr.prefix())
 	default:
-		if err := mr.emit("\n"); err != nil {
-			return err
-		}
+		mr.emit("\n")
 		mr.atBlankLine = true // suppress child's leading blankLine()
-		return mr.walkNode(node)
+		mr.walkNode(node)
 	}
 }
 
@@ -641,9 +607,7 @@ func (mr *mdNodeRenderer) renderDefinitionList(
 	w util.BufWriter, source []byte, n gmast.Node, entering bool,
 ) (gmast.WalkStatus, error) {
 	if entering {
-		if err := mr.blankLine(); err != nil {
-			return gmast.WalkStop, err
-		}
+		mr.blankLine()
 		mr.atBlankLine = true // suppress blank line before first child
 	}
 	return gmast.WalkContinue, nil
@@ -659,14 +623,10 @@ func (mr *mdNodeRenderer) renderDefinitionTerm(
 	}
 	// Blank line between successive term/description groups.
 	// The first term in the list gets its blank line from renderDefinitionList.
-	if err := mr.blankLine(); err != nil {
-		return gmast.WalkStop, err
-	}
+	mr.blankLine()
 	mr.atBlankLine = false
 	frags := mr.inlineFragments(n)
-	if err := mr.emitWrapped(frags, mr.prefix()); err != nil {
-		return gmast.WalkStop, err
-	}
+	mr.emitWrapped(frags, mr.prefix())
 	return gmast.WalkSkipChildren, nil
 }
 
@@ -687,20 +647,12 @@ func (mr *mdNodeRenderer) renderDefinitionDescription(
 	firstChild := true
 	for child := n.FirstChild(); child != nil; child = child.NextSibling() {
 		if firstChild {
-			if err := mr.emit(mr.prefix() + marker); err != nil {
-				return gmast.WalkStop, err
-			}
+			mr.emit(mr.prefix() + marker)
 			mr.pushPrefix(indent)
-			if err := mr.renderListItemFirstChild(child); err != nil {
-				return gmast.WalkStop, err
-			}
+			mr.renderListItemFirstChild(child)
 		} else {
-			if err := mr.blankLine(); err != nil {
-				return gmast.WalkStop, err
-			}
-			if err := mr.walkNode(child); err != nil {
-				return gmast.WalkStop, err
-			}
+			mr.blankLine()
+			mr.walkNode(child)
 		}
 		firstChild = false
 	}
@@ -719,24 +671,18 @@ func (mr *mdNodeRenderer) renderHTMLBlock(
 	if !entering {
 		return gmast.WalkContinue, nil
 	}
-	if err := mr.blankLine(); err != nil {
-		return gmast.WalkStop, err
-	}
+	mr.blankLine()
 	mr.atBlankLine = false
 	p := mr.prefix()
 	htmlBlock := n.(*gmast.HTMLBlock)
 	lines := htmlBlock.Lines()
 	for i := 0; i < lines.Len(); i++ {
 		seg := lines.At(i)
-		if err := mr.emit(p + string(seg.Value(source))); err != nil {
-			return gmast.WalkStop, err
-		}
+		mr.emit(p + string(seg.Value(source)))
 	}
 	if htmlBlock.HasClosure() {
 		seg := htmlBlock.ClosureLine
-		if err := mr.emit(p + string(seg.Value(source))); err != nil {
-			return gmast.WalkStop, err
-		}
+		mr.emit(p + string(seg.Value(source)))
 	}
 	return gmast.WalkSkipChildren, nil
 }
@@ -749,9 +695,7 @@ func (mr *mdNodeRenderer) renderTable(
 	if !entering {
 		return gmast.WalkContinue, nil
 	}
-	if err := mr.blankLine(); err != nil {
-		return gmast.WalkStop, err
-	}
+	mr.blankLine()
 	mr.atBlankLine = false
 
 	table := n.(*gmext.Table)
@@ -790,21 +734,15 @@ func (mr *mdNodeRenderer) renderTable(
 
 	// Emit header row.
 	if len(allCells) > 0 {
-		if err := mr.emitTableRow(allCells[0], colWidths, table.Alignments, p); err != nil {
-			return gmast.WalkStop, err
-		}
+		mr.emitTableRow(allCells[0], colWidths, table.Alignments, p)
 	}
 
 	// Emit separator row.
-	if err := mr.emitTableSeparator(table.Alignments, colWidths, p); err != nil {
-		return gmast.WalkStop, err
-	}
+	mr.emitTableSeparator(table.Alignments, colWidths, p)
 
 	// Emit body rows.
 	for _, cells := range allCells[1:] {
-		if err := mr.emitTableRow(cells, colWidths, table.Alignments, p); err != nil {
-			return gmast.WalkStop, err
-		}
+		mr.emitTableRow(cells, colWidths, table.Alignments, p)
 	}
 
 	return gmast.WalkSkipChildren, nil
@@ -812,10 +750,8 @@ func (mr *mdNodeRenderer) renderTable(
 
 func (mr *mdNodeRenderer) emitTableRow(
 	cells []string, colWidths []int, alignments []gmext.Alignment, p string,
-) error {
-	if err := mr.emit(p + "|"); err != nil {
-		return err
-	}
+) {
+	mr.emit(p + "|")
 	for i, w := range colWidths {
 		cell := ""
 		if i < len(cells) {
@@ -837,19 +773,15 @@ func (mr *mdNodeRenderer) emitTableRow(
 		default:
 			padded = cell + strings.Repeat(" ", pad)
 		}
-		if err := mr.emit(" " + padded + " |"); err != nil {
-			return err
-		}
+		mr.emit(" " + padded + " |")
 	}
-	return mr.emit("\n")
+	mr.emit("\n")
 }
 
 func (mr *mdNodeRenderer) emitTableSeparator(
 	alignments []gmext.Alignment, colWidths []int, p string,
-) error {
-	if err := mr.emit(p + "|"); err != nil {
-		return err
-	}
+) {
+	mr.emit(p + "|")
 	for i, w := range colWidths {
 		align := gmext.AlignNone
 		if i < len(alignments) {
@@ -868,11 +800,9 @@ func (mr *mdNodeRenderer) emitTableSeparator(
 		default:
 			sep = strings.Repeat("-", fw)
 		}
-		if err := mr.emit(sep + "|"); err != nil {
-			return err
-		}
+		mr.emit(sep + "|")
 	}
-	return mr.emit("\n")
+	mr.emit("\n")
 }
 
 // ---------- FootnoteList (GFM) ----------
@@ -887,49 +817,36 @@ func (mr *mdNodeRenderer) renderFootnoteList(
 }
 
 // renderFootnoteInner renders a single footnote definition.
-func (mr *mdNodeRenderer) renderFootnoteInner(fn *gmext.Footnote) error {
+func (mr *mdNodeRenderer) renderFootnoteInner(fn *gmext.Footnote) {
 	mr.atBlankLine = false
 	label := fmt.Sprintf("[^%s]: ", fn.Ref)
 	indent := strings.Repeat(" ", len(label))
 
-	if err := mr.emit(mr.prefix() + label); err != nil {
-		return err
-	}
+	mr.emit(mr.prefix() + label)
 	mr.pushPrefix(indent)
 	defer mr.popPrefix()
 
 	firstChild := true
 	for child := fn.FirstChild(); child != nil; child = child.NextSibling() {
 		if !firstChild {
-			if err := mr.blankLine(); err != nil {
-				return err
-			}
+			mr.blankLine()
 		}
 
 		if firstChild {
 			switch child.(type) {
 			case *gmast.Paragraph, *gmast.TextBlock:
 				frags := mr.inlineFragments(child)
-				if err := mr.emitWrappedContinuation(frags, mr.prefix()); err != nil {
-					return err
-				}
+				mr.emitWrappedContinuation(frags, mr.prefix())
 			default:
-				if err := mr.emit("\n"); err != nil {
-					return err
-				}
+				mr.emit("\n")
 				mr.atBlankLine = true
-				if err := mr.walkNode(child); err != nil {
-					return err
-				}
+				mr.walkNode(child)
 			}
 		} else {
-			if err := mr.walkNode(child); err != nil {
-				return err
-			}
+			mr.walkNode(child)
 		}
 		firstChild = false
 	}
-	return nil
 }
 
 // ========== Inline fragment collection ==========
@@ -1309,55 +1226,36 @@ func parseWordsWithSpacing(s string) (words []string, spacings []int, trailingSp
 }
 
 // emitWrapped writes fragments word-wrapped at the configured width.
-func (mr *mdNodeRenderer) emitWrapped(fragments []inlineFragment, p string) error {
+func (mr *mdNodeRenderer) emitWrapped(fragments []inlineFragment, p string) {
 	if len(fragments) == 0 {
-		return nil
+		return
 	}
 
-	col := len(p)
-	if err := mr.emit(p); err != nil {
-		return err
-	}
+	mr.emit(p)
 
-	startOfLine := true
 	var prevFrag inlineFragment
 	for _, frag := range fragments {
 		wordLen := len(frag.text)
 
-		if startOfLine {
-			if err := mr.emit(frag.text); err != nil {
-				return err
-			}
-			col += wordLen
-			startOfLine = false
+		if mr.col == len(p) {
+			mr.emit(frag.text)
 		} else {
 			sp := mr.spacingAfter(prevFrag)
-			if col+len(sp)+wordLen <= mr.width {
-				if err := mr.emit(sp + frag.text); err != nil {
-					return err
-				}
-				col += len(sp) + wordLen
+			if mr.col+len(sp)+wordLen <= mr.width {
+				mr.emit(sp + frag.text)
 			} else {
-				if err := mr.emit("\n" + p + frag.text); err != nil {
-					return err
-				}
-				col = len(p) + wordLen
+				mr.emit("\n" + p + frag.text)
 			}
 		}
 
 		prevFrag = frag
 
 		if frag.hardBreak {
-			if err := mr.emit("  \n" + p); err != nil {
-				return err
-			}
-			col = len(p)
-			startOfLine = true
-			prevFrag = inlineFragment{}
+			mr.emit("  \n" + p)
 		}
 	}
 
-	return mr.emit("\n")
+	mr.emit("\n")
 }
 
 // spacingAfter returns the spacing string to emit after a fragment.
@@ -1377,50 +1275,35 @@ func (mr *mdNodeRenderer) spacingAfter(prev inlineFragment) string {
 
 // emitWrappedContinuation is like emitWrapped but assumes the first line's
 // prefix has already been emitted (used after a bullet or footnote label).
-func (mr *mdNodeRenderer) emitWrappedContinuation(fragments []inlineFragment, p string) error {
+// mr.col already reflects the current column (caller emitted prefix+bullet).
+func (mr *mdNodeRenderer) emitWrappedContinuation(fragments []inlineFragment, p string) {
 	if len(fragments) == 0 {
-		return mr.emit("\n")
+		mr.emit("\n")
+		return
 	}
 
-	col := len(p)
-	startOfLine := true
 	var prevFrag inlineFragment
 
 	for _, frag := range fragments {
 		wordLen := len(frag.text)
 
-		if startOfLine {
-			if err := mr.emit(frag.text); err != nil {
-				return err
-			}
-			col += wordLen
-			startOfLine = false
+		if mr.col == len(p) {
+			mr.emit(frag.text)
 		} else {
 			sp := mr.spacingAfter(prevFrag)
-			if col+len(sp)+wordLen <= mr.width {
-				if err := mr.emit(sp + frag.text); err != nil {
-					return err
-				}
-				col += len(sp) + wordLen
+			if mr.col+len(sp)+wordLen <= mr.width {
+				mr.emit(sp + frag.text)
 			} else {
-				if err := mr.emit("\n" + p + frag.text); err != nil {
-					return err
-				}
-				col = len(p) + wordLen
+				mr.emit("\n" + p + frag.text)
 			}
 		}
 
 		prevFrag = frag
 
 		if frag.hardBreak {
-			if err := mr.emit("  \n" + p); err != nil {
-				return err
-			}
-			col = len(p)
-			startOfLine = true
-			prevFrag = inlineFragment{}
+			mr.emit("  \n" + p)
 		}
 	}
 
-	return mr.emit("\n")
+	mr.emit("\n")
 }

@@ -35,7 +35,6 @@ If no files are supplied, remark will operate on stdin/stdout.
 			filepath.Base(os.Args[0]))
 		pflag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, `
-
 Note on inter-sentence spacing: Space is generally preserved.  The -1 switch
 controls only what happens when it isn't.  Consider re-wrapping a paragraph
 where one line ends in a period.  In this case, remark has to insert space
