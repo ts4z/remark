@@ -239,9 +239,6 @@ func (mr *mdNodeRenderer) emit(s string) {
 		return
 	}
 	_, mr.err = mr.w.WriteString(s)
-	if mr.err != nil {
-		return
-	}
 	if i := strings.LastIndex(s, "\n"); i >= 0 {
 		mr.col = len(s) - i - 1
 	} else {
