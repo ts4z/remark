@@ -1038,7 +1038,7 @@ func (mr *mdNodeRenderer) collectInlineFragments(node gmast.Node, frags *[]inlin
 			url := string(n.URL(mr.source))
 			mr.addInlineFrag(frags, child, "<"+url+">")
 		case *gmast.RawHTML:
-			html := mr.segmentsText(n)
+			html := mr.rawHTMLText(n)
 			mr.addInlineFrag(frags, child, html)
 		case *gmast.String:
 			*frags = append(*frags, inlineFragment{text: string(n.Value)})
@@ -1178,6 +1178,18 @@ func (mr *mdNodeRenderer) segmentsText(node gmast.Node) string {
 	lines := node.Lines()
 	for i := 0; i < lines.Len(); i++ {
 		seg := lines.At(i)
+		sb.Write(seg.Value(mr.source))
+	}
+	return sb.String()
+}
+
+// rawHTMLText returns the source text of a RawHTML inline node.
+// RawHTML stores segments in its own Segments field rather than via
+// Lines(), which panics for inline nodes.
+func (mr *mdNodeRenderer) rawHTMLText(n *gmast.RawHTML) string {
+	var sb strings.Builder
+	for i := 0; i < n.Segments.Len(); i++ {
+		seg := n.Segments.At(i)
 		sb.Write(seg.Value(mr.source))
 	}
 	return sb.String()
