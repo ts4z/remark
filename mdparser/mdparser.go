@@ -145,6 +145,10 @@ func (r *Renderable) Render(w io.Writer) error {
 	return nr.err
 }
 
+// We never return error from a gmrenderer.NodeRendererFunc, so we have this
+// simplified signature that we can easily adapt to.
+type nodeRendererFuncLite func(writer util.BufWriter, source []byte, n gmast.Node, entering bool) gmast.WalkStatus
+
 // mdNodeRenderer implements goldmark's renderer.NodeRenderer interface,
 // rendering AST nodes back to formatted Markdown with word wrapping.
 type mdNodeRenderer struct {
@@ -153,19 +157,19 @@ type mdNodeRenderer struct {
 	// Rendering state
 	source                []byte
 	w                     util.BufWriter
-	col                   int      // current column position in output
-	err                   error    // first write error; emit becomes a no-op once set
+	col                   int   // current column position in output
+	err                   error // first write error; emit becomes a no-op once set
 	atBlankLine           bool
 	oneSpaceAfterSentence bool     // one space after sentence-ending punctuation
 	prefixes              []string // prefix stack for nesting
 
 	// funcs stores registered render functions for manual sub-walks.
-	funcs map[gmast.NodeKind]gmrenderer.NodeRendererFunc
+	funcs map[gmast.NodeKind]nodeRendererFuncLite
 }
 
 // RegisterFuncs registers render functions for each AST node kind.
 func (mr *mdNodeRenderer) RegisterFuncs(reg gmrenderer.NodeRendererFuncRegisterer) {
-	mr.funcs = map[gmast.NodeKind]gmrenderer.NodeRendererFunc{}
+	mr.funcs = map[gmast.NodeKind]nodeRendererFuncLite{}
 
 	// Standard Markdown block nodes.
 	mr.register(reg, gmast.KindDocument, mr.renderDocument)
@@ -192,9 +196,11 @@ func (mr *mdNodeRenderer) RegisterFuncs(reg gmrenderer.NodeRendererFuncRegistere
 func (mr *mdNodeRenderer) register(
 	reg gmrenderer.NodeRendererFuncRegisterer,
 	kind gmast.NodeKind,
-	f gmrenderer.NodeRendererFunc,
-) {
-	reg.Register(kind, f)
+	f nodeRendererFuncLite) {
+	reg.Register(kind, func(writer util.BufWriter, source []byte, n gmast.Node, entering bool) (gmast.WalkStatus, error) {
+		// Adapt slightly -- we never return nil from our implementations.
+		return f(writer, source, n, entering), nil
+	})
 	mr.funcs[kind] = f
 }
 
@@ -204,7 +210,7 @@ func (mr *mdNodeRenderer) register(
 func (mr *mdNodeRenderer) walkNode(node gmast.Node) {
 	gmast.Walk(node, func(n gmast.Node, entering bool) (gmast.WalkStatus, error) {
 		if f := mr.funcs[n.Kind()]; f != nil {
-			return f(mr.w, mr.source, n, entering)
+			return f(mr.w, mr.source, n, entering), nil
 		}
 		return gmast.WalkContinue, nil
 	})
@@ -282,9 +288,9 @@ func (mr *mdNodeRenderer) blankLineBefore(pos int) bool {
 
 func (mr *mdNodeRenderer) renderDocument(
 	w util.BufWriter, source []byte, n gmast.Node, entering bool,
-) (gmast.WalkStatus, error) {
+) gmast.WalkStatus {
 	if !entering {
-		return gmast.WalkContinue, nil
+		return gmast.WalkContinue
 	}
 	mr.w = w // capture writer for helper methods
 
@@ -355,7 +361,7 @@ func (mr *mdNodeRenderer) renderDocument(
 		}
 	}
 
-	return gmast.WalkSkipChildren, nil
+	return gmast.WalkSkipChildren
 }
 
 // footnotePos pairs a footnote with its source position.
@@ -413,9 +419,9 @@ func (mr *mdNodeRenderer) blockStartPos(n gmast.Node) int {
 
 func (mr *mdNodeRenderer) renderHeading(
 	w util.BufWriter, source []byte, n gmast.Node, entering bool,
-) (gmast.WalkStatus, error) {
+) gmast.WalkStatus {
 	if !entering {
-		return gmast.WalkContinue, nil
+		return gmast.WalkContinue
 	}
 	mr.blankLine()
 	mr.atBlankLine = false
@@ -423,45 +429,45 @@ func (mr *mdNodeRenderer) renderHeading(
 	hashes := strings.Repeat("#", heading.Level)
 	text := mr.inlineText(n)
 	mr.emit(mr.prefix() + hashes + " " + text + "\n")
-	return gmast.WalkSkipChildren, nil
+	return gmast.WalkSkipChildren
 }
 
 // ---------- Paragraph / TextBlock ----------
 
 func (mr *mdNodeRenderer) renderParagraph(
 	w util.BufWriter, source []byte, n gmast.Node, entering bool,
-) (gmast.WalkStatus, error) {
+) gmast.WalkStatus {
 	if !entering {
-		return gmast.WalkContinue, nil
+		return gmast.WalkContinue
 	}
 	mr.blankLine()
 	mr.atBlankLine = false
 	frags := mr.inlineFragments(n)
 	mr.emitWrapped(frags, mr.prefix())
-	return gmast.WalkSkipChildren, nil
+	return gmast.WalkSkipChildren
 }
 
 // ---------- ThematicBreak ----------
 
 func (mr *mdNodeRenderer) renderThematicBreak(
 	w util.BufWriter, source []byte, n gmast.Node, entering bool,
-) (gmast.WalkStatus, error) {
+) gmast.WalkStatus {
 	if !entering {
-		return gmast.WalkContinue, nil
+		return gmast.WalkContinue
 	}
 	mr.blankLine()
 	mr.atBlankLine = false
 	mr.emit(mr.prefix() + "---\n")
-	return gmast.WalkContinue, nil
+	return gmast.WalkContinue
 }
 
 // ---------- FencedCodeBlock ----------
 
 func (mr *mdNodeRenderer) renderFencedCodeBlock(
 	w util.BufWriter, source []byte, n gmast.Node, entering bool,
-) (gmast.WalkStatus, error) {
+) gmast.WalkStatus {
 	if !entering {
-		return gmast.WalkContinue, nil
+		return gmast.WalkContinue
 	}
 	mr.blankLine()
 	mr.atBlankLine = false
@@ -481,16 +487,16 @@ func (mr *mdNodeRenderer) renderFencedCodeBlock(
 		mr.emit(p + string(seg.Value(source)))
 	}
 	mr.emit(p + "```\n")
-	return gmast.WalkSkipChildren, nil
+	return gmast.WalkSkipChildren
 }
 
 // ---------- CodeBlock (indented) ----------
 
 func (mr *mdNodeRenderer) renderCodeBlock(
 	w util.BufWriter, source []byte, n gmast.Node, entering bool,
-) (gmast.WalkStatus, error) {
+) gmast.WalkStatus {
 	if !entering {
-		return gmast.WalkContinue, nil
+		return gmast.WalkContinue
 	}
 	mr.blankLine()
 	mr.atBlankLine = false
@@ -501,7 +507,7 @@ func (mr *mdNodeRenderer) renderCodeBlock(
 		seg := lines.At(i)
 		mr.emit(p + "    " + string(seg.Value(source)))
 	}
-	return gmast.WalkSkipChildren, nil
+	return gmast.WalkSkipChildren
 }
 
 // ---------- Blockquote ----------
@@ -510,7 +516,7 @@ func (mr *mdNodeRenderer) renderCodeBlock(
 
 func (mr *mdNodeRenderer) renderBlockquote(
 	w util.BufWriter, source []byte, n gmast.Node, entering bool,
-) (gmast.WalkStatus, error) {
+) gmast.WalkStatus {
 	if entering {
 		mr.blankLine()
 		mr.pushPrefix("> ")
@@ -518,7 +524,7 @@ func (mr *mdNodeRenderer) renderBlockquote(
 	} else {
 		mr.popPrefix()
 	}
-	return gmast.WalkContinue, nil
+	return gmast.WalkContinue
 }
 
 // ---------- List ----------
@@ -527,9 +533,9 @@ func (mr *mdNodeRenderer) renderBlockquote(
 
 func (mr *mdNodeRenderer) renderList(
 	w util.BufWriter, source []byte, n gmast.Node, entering bool,
-) (gmast.WalkStatus, error) {
+) gmast.WalkStatus {
 	if !entering {
-		return gmast.WalkContinue, nil
+		return gmast.WalkContinue
 	}
 	mr.blankLine()
 	mr.atBlankLine = false
@@ -581,7 +587,7 @@ func (mr *mdNodeRenderer) renderList(
 			mr.popPrefix()
 		}
 	}
-	return gmast.WalkSkipChildren, nil
+	return gmast.WalkSkipChildren
 }
 
 // renderListItemFirstChild renders the first block of a list item,
@@ -605,21 +611,21 @@ func (mr *mdNodeRenderer) renderListItemFirstChild(node gmast.Node) {
 
 func (mr *mdNodeRenderer) renderDefinitionList(
 	w util.BufWriter, source []byte, n gmast.Node, entering bool,
-) (gmast.WalkStatus, error) {
+) gmast.WalkStatus {
 	if entering {
 		mr.blankLine()
 		mr.atBlankLine = true // suppress blank line before first child
 	}
-	return gmast.WalkContinue, nil
+	return gmast.WalkContinue
 }
 
 // renderDefinitionTerm renders the term (the word being defined).
 // Terms contain inline content and are emitted as a standalone line.
 func (mr *mdNodeRenderer) renderDefinitionTerm(
 	w util.BufWriter, source []byte, n gmast.Node, entering bool,
-) (gmast.WalkStatus, error) {
+) gmast.WalkStatus {
 	if !entering {
-		return gmast.WalkContinue, nil
+		return gmast.WalkContinue
 	}
 	// Blank line between successive term/description groups.
 	// The first term in the list gets its blank line from renderDefinitionList.
@@ -627,7 +633,7 @@ func (mr *mdNodeRenderer) renderDefinitionTerm(
 	mr.atBlankLine = false
 	frags := mr.inlineFragments(n)
 	mr.emitWrapped(frags, mr.prefix())
-	return gmast.WalkSkipChildren, nil
+	return gmast.WalkSkipChildren
 }
 
 // renderDefinitionDescription renders a definition (`: ` prefixed description).
@@ -635,9 +641,9 @@ func (mr *mdNodeRenderer) renderDefinitionTerm(
 // emitted inline after the `: ` marker, subsequent blocks are indented.
 func (mr *mdNodeRenderer) renderDefinitionDescription(
 	w util.BufWriter, source []byte, n gmast.Node, entering bool,
-) (gmast.WalkStatus, error) {
+) gmast.WalkStatus {
 	if !entering {
-		return gmast.WalkContinue, nil
+		return gmast.WalkContinue
 	}
 	mr.atBlankLine = false
 
@@ -660,16 +666,16 @@ func (mr *mdNodeRenderer) renderDefinitionDescription(
 	if !firstChild {
 		mr.popPrefix()
 	}
-	return gmast.WalkSkipChildren, nil
+	return gmast.WalkSkipChildren
 }
 
 // ---------- HTMLBlock ----------
 
 func (mr *mdNodeRenderer) renderHTMLBlock(
 	w util.BufWriter, source []byte, n gmast.Node, entering bool,
-) (gmast.WalkStatus, error) {
+) gmast.WalkStatus {
 	if !entering {
-		return gmast.WalkContinue, nil
+		return gmast.WalkContinue
 	}
 	mr.blankLine()
 	mr.atBlankLine = false
@@ -684,16 +690,16 @@ func (mr *mdNodeRenderer) renderHTMLBlock(
 		seg := htmlBlock.ClosureLine
 		mr.emit(p + string(seg.Value(source)))
 	}
-	return gmast.WalkSkipChildren, nil
+	return gmast.WalkSkipChildren
 }
 
 // ---------- Table (GFM) ----------
 
 func (mr *mdNodeRenderer) renderTable(
 	w util.BufWriter, source []byte, n gmast.Node, entering bool,
-) (gmast.WalkStatus, error) {
+) gmast.WalkStatus {
 	if !entering {
-		return gmast.WalkContinue, nil
+		return gmast.WalkContinue
 	}
 	mr.blankLine()
 	mr.atBlankLine = false
@@ -745,7 +751,7 @@ func (mr *mdNodeRenderer) renderTable(
 		mr.emitTableRow(cells, colWidths, table.Alignments, p)
 	}
 
-	return gmast.WalkSkipChildren, nil
+	return gmast.WalkSkipChildren
 }
 
 func (mr *mdNodeRenderer) emitTableRow(
@@ -812,8 +818,8 @@ func (mr *mdNodeRenderer) emitTableSeparator(
 
 func (mr *mdNodeRenderer) renderFootnoteList(
 	w util.BufWriter, source []byte, n gmast.Node, entering bool,
-) (gmast.WalkStatus, error) {
-	return gmast.WalkSkipChildren, nil
+) gmast.WalkStatus {
+	return gmast.WalkSkipChildren
 }
 
 // renderFootnoteInner renders a single footnote definition.
@@ -886,10 +892,7 @@ func (mr *mdNodeRenderer) collectInlineFragments(node gmast.Node, frags *[]inlin
 			}
 			if leadingSpaces > 0 && len(*frags) > 0 {
 				prev := &(*frags)[len(*frags)-1]
-				prevTrailing := prev.spacesAfter
-				if prevTrailing < 0 {
-					prevTrailing = 0
-				}
+				prevTrailing := max(prev.spacesAfter, 0)
 				prev.spacesAfter = min(prevTrailing+leadingSpaces, 2)
 			}
 			// If the raw text has no leading whitespace AND the
