@@ -241,9 +241,9 @@ func (mr *mdNodeRenderer) emit(s string) {
 	}
 	_, mr.err = mr.w.WriteString(s)
 	if i := strings.LastIndex(s, "\n"); i >= 0 {
-		mr.col = len(s) - i - 1
+		mr.col = utf8.RuneCountInString(s[i+1:])
 	} else {
-		mr.col += len(s)
+		mr.col += utf8.RuneCountInString(s)
 	}
 }
 
@@ -1240,7 +1240,7 @@ func (mr *mdNodeRenderer) emitWrapped(fragments []inlineFragment, p string) {
 
 	var prevFrag inlineFragment
 	for _, frag := range fragments {
-		wordLen := len(frag.text)
+		wordLen := utf8.RuneCountInString(frag.text)
 
 		if mr.col == len(p) {
 			mr.emit(frag.text)
@@ -1290,7 +1290,7 @@ func (mr *mdNodeRenderer) emitWrappedContinuation(fragments []inlineFragment, p 
 	var prevFrag inlineFragment
 
 	for _, frag := range fragments {
-		wordLen := len(frag.text)
+		wordLen := utf8.RuneCountInString(frag.text)
 
 		if mr.col == len(p) {
 			mr.emit(frag.text)

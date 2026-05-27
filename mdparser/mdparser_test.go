@@ -90,6 +90,18 @@ func TestParagraph(t *testing.T) {
 	}
 }
 
+func TestWrapWithMultibyteUnicode(t *testing.T) {
+	// U+2019 RIGHT SINGLE QUOTATION MARK is 3 bytes but 1 column wide.
+	// At width 20, "Hello world Hold'em" is 19 visual columns and fits;
+	// byte-based arithmetic would count 21 bytes and wrap prematurely.
+	input := "Hello world Hold’em poker\n"
+	want := "Hello world Hold’em\npoker\n"
+	got := roundTrip(t, input, 20)
+	if got != want {
+		t.Errorf("got:\n%q\nwant:\n%q", got, want)
+	}
+}
+
 func TestTwoParagraphs(t *testing.T) {
 	input := "First paragraph.\n\nSecond paragraph.\n"
 	want := "First paragraph.\n\nSecond paragraph.\n"
