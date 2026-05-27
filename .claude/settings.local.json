@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(go test:*)",
-      "Bash(echo \"EXIT: $?\")"
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(go list *)"
     ]
   }
 }
