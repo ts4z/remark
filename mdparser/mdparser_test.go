@@ -92,13 +92,71 @@ func TestParagraph(t *testing.T) {
 
 func TestWrapWithMultibyteUnicode(t *testing.T) {
 	// U+2019 RIGHT SINGLE QUOTATION MARK is 3 bytes but 1 column wide.
-	// At width 20, "Hello world Hold'em" is 19 visual columns and fits;
+	// At width 20, "Hello world Hold’em" is 19 visual columns and fits;
 	// byte-based arithmetic would count 21 bytes and wrap prematurely.
 	input := "Hello world Hold’em poker\n"
 	want := "Hello world Hold’em\npoker\n"
 	got := roundTrip(t, input, 20)
 	if got != want {
 		t.Errorf("got:\n%q\nwant:\n%q", got, want)
+	}
+}
+
+func TestWrapWithCombiningCharacters(t *testing.T) {
+	// "é" is a two-rune decomposed sequence: Latin small letter e
+	// followed by U+0301 COMBINING ACUTE ACCENT.  The combining mark has
+	// zero display width, so the pair occupies exactly 1 terminal column.
+	// "Héllo world" is 12 runes but only 11 display columns.
+	// At width 11 the whole string fits on one line; a rune-count approach
+	// sees 12 > 11 and incorrectly wraps after "Héllo".
+	input := "Héllo world\n"
+	want := "Héllo world\n" // 11 display cols <= width 11: no wrap
+	got := roundTrip(t, input, 11)
+	if got != want {
+		t.Errorf("got:\n%q\nwant:\n%q", got, want)
+	}
+}
+
+func TestWrapWithWideEmoji(t *testing.T) {
+	// U+1F389 PARTY POPPER is 2 terminal columns wide.
+	// "A \U0001F389 B" has 6 display columns (1+1+2+1+1).
+	// A rune-count approach counts the emoji as 1 rune: at width 5 it sees
+	// col(A)+1+runes(emoji)=3 for "A emoji" then 3+1+1=5 and fits "B" too,
+	// producing "A emoji B" — but visually that is 6 cols > 5.
+	// displayWidth correctly returns 2 for the emoji, so "B" wraps.
+	input := "A \U0001F389 B\n"
+	want := "A \U0001F389\nB\n"
+	got := roundTrip(t, input, 5)
+	if got != want {
+		t.Errorf("got:\n%q\nwant:\n%q", got, want)
+	}
+}
+
+func TestWrapWithFlagEmoji(t *testing.T) {
+	// U+1F1FA U+1F1F8 form a regional-indicator pair (flag emoji 🇺🇸).
+	// The grapheme segmenter inside go-runewidth treats the pair as a single
+	// grapheme cluster, so the two runes are never split across lines.
+	// Verify the formatter produces a sensible line break without panic or
+	// garbling when this sequence appears in the input.
+	input := "Flag \U0001F1FA\U0001F1F8 here\n"
+	want := "Flag \U0001F1FA\U0001F1F8\nhere\n"
+	got := roundTrip(t, input, 8)
+	if got != want {
+		t.Errorf("got:\n%q\nwant:\n%q", got, want)
+	}
+}
+
+func TestTableWithWideCharacters(t *testing.T) {
+	// CJK characters U+4E2D (中) and U+6587 (文) are each 2 terminal columns
+	// wide.  The cell "中文" has a display width of 4, not a rune count of 2.
+	// Column padding must use display width or the pipe delimiters misalign.
+	// col 0 width = max(displayWidth("A")=1, displayWidth("中文")=4, min 3) = 4
+	// col 1 width = max(displayWidth("B")=1, displayWidth("hi")=2,  min 3) = 3
+	input := "| A | B |\n| --- | --- |\n| 中文 | hi |\n"
+	want := "| A    | B   |\n|------|-----|\n| 中文 | hi  |\n"
+	got := roundTrip(t, input, 79)
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
 	}
 }
 

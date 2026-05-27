@@ -11,7 +11,6 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
-	"unicode/utf8"
 
 	"github.com/yuin/goldmark"
 	gmast "github.com/yuin/goldmark/ast"
@@ -241,9 +240,9 @@ func (mr *mdNodeRenderer) emit(s string) {
 	}
 	_, mr.err = mr.w.WriteString(s)
 	if i := strings.LastIndex(s, "\n"); i >= 0 {
-		mr.col = utf8.RuneCountInString(s[i+1:])
+		mr.col = displayWidth(s[i+1:])
 	} else {
-		mr.col += utf8.RuneCountInString(s)
+		mr.col += displayWidth(s)
 	}
 }
 
@@ -725,8 +724,8 @@ func (mr *mdNodeRenderer) renderTable(
 		for cell := row.FirstChild(); cell != nil; cell = cell.NextSibling() {
 			text := mr.inlineText(cell)
 			cells = append(cells, text)
-			if col < numCols && utf8.RuneCountInString(text) > colWidths[col] {
-				colWidths[col] = utf8.RuneCountInString(text)
+			if col < numCols && displayWidth(text) > colWidths[col] {
+				colWidths[col] = displayWidth(text)
 			}
 			col++
 		}
@@ -769,7 +768,7 @@ func (mr *mdNodeRenderer) emitTableRow(
 		if i < len(alignments) {
 			align = alignments[i]
 		}
-		pad := w - utf8.RuneCountInString(cell)
+		pad := w - displayWidth(cell)
 		var padded string
 		switch align {
 		case gmext.AlignRight:
@@ -1240,13 +1239,13 @@ func (mr *mdNodeRenderer) emitWrapped(fragments []inlineFragment, p string) {
 
 	var prevFrag inlineFragment
 	for _, frag := range fragments {
-		wordLen := utf8.RuneCountInString(frag.text)
+		wordLen := displayWidth(frag.text)
 
-		if mr.col == len(p) {
+		if mr.col == displayWidth(p) {
 			mr.emit(frag.text)
 		} else {
 			sp := mr.spacingAfter(prevFrag)
-			if mr.col+len(sp)+wordLen <= mr.width {
+			if mr.col+displayWidth(sp)+wordLen <= mr.width {
 				mr.emit(sp + frag.text)
 			} else {
 				mr.emit("\n" + p + frag.text)
@@ -1290,13 +1289,13 @@ func (mr *mdNodeRenderer) emitWrappedContinuation(fragments []inlineFragment, p 
 	var prevFrag inlineFragment
 
 	for _, frag := range fragments {
-		wordLen := utf8.RuneCountInString(frag.text)
+		wordLen := displayWidth(frag.text)
 
-		if mr.col == len(p) {
+		if mr.col == displayWidth(p) {
 			mr.emit(frag.text)
 		} else {
 			sp := mr.spacingAfter(prevFrag)
-			if mr.col+len(sp)+wordLen <= mr.width {
+			if mr.col+displayWidth(sp)+wordLen <= mr.width {
 				mr.emit(sp + frag.text)
 			} else {
 				mr.emit("\n" + p + frag.text)
