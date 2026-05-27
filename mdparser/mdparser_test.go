@@ -608,6 +608,8 @@ func TestDefinitionList(t *testing.T) {
 	}
 }
 
+// TODO: If this is *preserved*, then the inputs and outputs should be the same
+// and one can be deleted.
 func TestListSpacingPreserved(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -659,12 +661,30 @@ func TestListSpacingPreserved(t *testing.T) {
 				"- In Sohe, the Omaha hand is treated as the high hand.\n",
 			width: 79,
 		},
+		{
+			name: "tight list stays tight even when it has a sublist",
+			input: "- Unmanaged HTML lives in here.  This includes:\n" +
+				"  - The rulebook HTML is managed via mdbook and its own GitHub repo.\n" +
+				"  - Migrated content that hasn't been cleaned up may be in static.\n" +
+				"- A few unmanaged PDFs live here.  These include `rulebook.pdf` as well as\n" +
+				"  another one that is likely a duplicate and misplaced.\n",
+			want: "- Unmanaged HTML lives in here.  This includes:\n" +
+				"  - The rulebook HTML is managed via mdbook and its own GitHub repo.\n" +
+				"  - Migrated content that hasn't been cleaned up may be in static.\n" +
+				"- A few unmanaged PDFs live here.  These include `rulebook.pdf` as well as\n" +
+				"  another one that is likely a duplicate and misplaced.\n",
+			width: 79,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got := roundTrip(t, tc.input, tc.width)
 			if got != tc.want {
 				t.Errorf("got:\n%s\nwant:\n%s", got, tc.want)
+			}
+			got2 := roundTrip(t, tc.input, tc.width)
+			if got2 != tc.want {
+				t.Errorf("idempotency check: got:\n%s\nwant:\n%s", got2, tc.want)
 			}
 		})
 	}

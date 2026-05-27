@@ -567,7 +567,11 @@ func (mr *mdNodeRenderer) renderList(
 		firstChild := true
 		for itemChild := child.FirstChild(); itemChild != nil; itemChild = itemChild.NextSibling() {
 			if !firstChild {
-				mr.blankLine()
+				if mr.blankLineBefore(mr.blockStartPos(itemChild)) {
+					mr.blankLine()
+				} else {
+					mr.atBlankLine = true // suppress child's leading blankLine()
+				}
 			}
 
 			if firstChild {
