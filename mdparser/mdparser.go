@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/yuin/goldmark"
 	gmast "github.com/yuin/goldmark/ast"
@@ -724,8 +725,8 @@ func (mr *mdNodeRenderer) renderTable(
 		for cell := row.FirstChild(); cell != nil; cell = cell.NextSibling() {
 			text := mr.inlineText(cell)
 			cells = append(cells, text)
-			if col < numCols && len(text) > colWidths[col] {
-				colWidths[col] = len(text)
+			if col < numCols && utf8.RuneCountInString(text) > colWidths[col] {
+				colWidths[col] = utf8.RuneCountInString(text)
 			}
 			col++
 		}
@@ -768,7 +769,7 @@ func (mr *mdNodeRenderer) emitTableRow(
 		if i < len(alignments) {
 			align = alignments[i]
 		}
-		pad := w - len(cell)
+		pad := w - utf8.RuneCountInString(cell)
 		var padded string
 		switch align {
 		case gmext.AlignRight:

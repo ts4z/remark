@@ -329,6 +329,26 @@ func TestTableAlignment(t *testing.T) {
 	}
 }
 
+func TestTableWithMultibyteUnicode(t *testing.T) {
+	// U+2019 RIGHT SINGLE QUOTATION MARK is 3 bytes in UTF-8 but 1 column
+	// wide.  Padding must use rune count, not byte length, or the pipe
+	// delimiters of rows with multi-byte chars appear shifted left.
+	// "Hold’em" is 7 runes but 9 bytes; the widest cell is
+	// "Longer text here" at 16 runes.  Without the fix, pad = 16-9 = 7
+	// instead of the correct 16-7 = 9, shifting that row's closing pipe
+	// two columns left.
+	input := "| A | B |\n| :--- | ---: |\n| Hold’em | 100 |\n| Longer text here | 42 |\n"
+	want := "" +
+		"| A                |   B |\n" +
+		"|:-----------------|----:|\n" +
+		"| Hold’em          | 100 |\n" +
+		"| Longer text here |  42 |\n"
+	got := roundTrip(t, input, 79)
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 func TestFootnoteReference(t *testing.T) {
 	input := "Both web and print versions of this book are both produced from the same files[^1].\n\n[^1]: [https://github.com/ts4z/barge-rulebook/](https://github.com/ts4z/barge-rulebook/)\n"
 	want := "Both web and print versions of this book are both produced from the same\nfiles[^1].\n\n[^1]: [https://github.com/ts4z/barge-rulebook/](https://github.com/ts4z/barge-rulebook/)\n"
