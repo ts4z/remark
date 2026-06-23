@@ -153,7 +153,7 @@ func TestTableWithWideCharacters(t *testing.T) {
 	// col 0 width = max(displayWidth("A")=1, displayWidth("中文")=4, min 3) = 4
 	// col 1 width = max(displayWidth("B")=1, displayWidth("hi")=2,  min 3) = 3
 	input := "| A | B |\n| --- | --- |\n| 中文 | hi |\n"
-	want := "| A    | B   |\n|------|-----|\n| 中文 | hi  |\n"
+	want := "| A    | B  |\n|------|----|\n| 中文 | hi |\n"
 	got := roundTrip(t, input, 79)
 	if got != want {
 		t.Errorf("got:\n%s\nwant:\n%s", got, want)
@@ -382,8 +382,8 @@ func TestTaskList(t *testing.T) {
 }
 
 func TestSimpleTable(t *testing.T) {
-	input := "| A | B |\n| --- | --- |\n| 1 | 2 |\n"
-	want := "| A   | B   |\n|-----|-----|\n| 1   | 2   |\n"
+	input := "| A | B |\n| --- | --- |\n| 1 |22|\n"
+	want := "| A | B  |\n|---|----|\n| 1 | 22 |\n"
 	got := roundTrip(t, input, 79)
 	if got != want {
 		t.Errorf("got:\n%s\nwant:\n%s", got, want)

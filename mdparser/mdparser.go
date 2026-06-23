@@ -732,11 +732,10 @@ func (mr *mdNodeRenderer) renderTable(
 		allCells = append(allCells, cells)
 	}
 
-	// Minimum column width is 3 (for separator like ---).
+	// Minimum column width is 1, since leading space/trailing space don't
+	// count.  Make sure we always have at least 1.
 	for i := range colWidths {
-		if colWidths[i] < 3 {
-			colWidths[i] = 3
-		}
+		colWidths[i] = max(colWidths[i], 1)
 	}
 
 	// Emit header row.
