@@ -2,6 +2,7 @@ package mdparser
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -30,6 +31,78 @@ func TestEmptyInput(t *testing.T) {
 	got := roundTrip(t, "", 79)
 	if got != "" {
 		t.Errorf("expected empty output, got %q", got)
+	}
+}
+
+// TestShortcodeShortStaysInline checks that short block-level shortcodes are
+// kept on a single line (and that source line breaks within one are rejoined).
+func TestShortcodeShortStaysInline(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"percent", "{{% note %}}\n", "{{% note %}}\n"},
+		{"angle", "{{< ref \"x.md\" >}}\n", "{{< ref \"x.md\" >}}\n"},
+		{
+			"multiline rejoined",
+			"{{< relref\n\"/x\" >}}\n",
+			"{{< relref \"/x\" >}}\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := roundTrip(t, tt.input, 79)
+			if got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestShortcodeLongExpands checks that a long block-level shortcode is expanded
+// with the name on the opening line, one argument per indented line, and the
+// closing delimiter riding on the last argument line.
+func TestShortcodeLongExpands(t *testing.T) {
+	in := "{{< tournament event=\"No Limit Hold'em Main Event\" players=177 >}}\n"
+	want := "{{< tournament\n" +
+		"    event=\"No Limit Hold'em Main Event\"\n" +
+		"    players=177 >}}\n"
+	if got := roundTrip(t, in, 79); got != want {
+		t.Errorf("got:\n%q\nwant:\n%q", got, want)
+	}
+}
+
+// TestShortcodeExpandPreservesEscapes checks that quoted arguments containing
+// spaces and escaped quotes survive tokenization intact.
+func TestShortcodeExpandPreservesEscapes(t *testing.T) {
+	in := "{{< tournament event=\"Limit \\\"Win the Button\\\"\" players=27 prize-pool=\"$1,539\" >}}\n"
+	want := "{{< tournament\n" +
+		"    event=\"Limit \\\"Win the Button\\\"\"\n" +
+		"    players=27\n" +
+		"    prize-pool=\"$1,539\" >}}\n"
+	if got := roundTrip(t, in, 79); got != want {
+		t.Errorf("got:\n%q\nwant:\n%q", got, want)
+	}
+}
+
+// TestShortcodeInlineNotExpanded checks that a shortcode mixed with other
+// inline content stays on one line, glued to its surroundings, even when long.
+func TestShortcodeInlineNotExpanded(t *testing.T) {
+	in := "See [the page]({{< ref \"x.md\" >}}) now.\n"
+	got := roundTrip(t, in, 79)
+	if !strings.Contains(got, "]({{< ref \"x.md\" >}})") {
+		t.Errorf("inline shortcode not kept intact/glued: %q", got)
+	}
+}
+
+// TestShortcodeDisabled verifies the --no-shortcodes path: with preservation
+// off, a long block-level shortcode is treated as ordinary prose and wraps.
+func TestShortcodeDisabled(t *testing.T) {
+	input := "{{< tournament event=\"Main Event\" players=177 >}}\n"
+	off := roundTripWith(t, input, WithWidth(20), WithShortcodes(false))
+	if strings.Count(off, "\n") < 2 {
+		t.Errorf("with shortcodes off, expected prose wrapping, got %q", off)
 	}
 }
 

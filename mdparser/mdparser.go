@@ -46,6 +46,15 @@ func WithFrontmatter(v bool) Option {
 	}
 }
 
+// WithShortcodes controls whether Hugo shortcodes ({{< … >}} and {{% … %}})
+// are recognized and preserved verbatim (never wrapped or split).  The
+// default is true.
+func WithShortcodes(v bool) Option {
+	return func(p *Parser) {
+		p.shortcodes = v
+	}
+}
+
 // WarnFunc is a callback used to emit warnings.
 type WarnFunc func(format string, args ...interface{})
 
@@ -61,14 +70,15 @@ type Parser struct {
 	width                 int
 	oneSpaceAfterSentence bool
 	frontmatter           bool
+	shortcodes            bool
 	warn                  WarnFunc
 }
 
 // NewParser creates a Parser with the given options.
 // Default width is 79.  Two spaces after sentences is the default.
-// Frontmatter detection is enabled by default.
+// Frontmatter detection and shortcode preservation are enabled by default.
 func NewParser(opts ...Option) *Parser {
-	p := &Parser{width: 79, frontmatter: true}
+	p := &Parser{width: 79, frontmatter: true, shortcodes: true}
 	for _, o := range opts {
 		o(p)
 	}
@@ -93,13 +103,15 @@ func (p *Parser) Parse(source []byte) (*Renderable, error) {
 		}
 	}
 
-	md := goldmark.New(
-		goldmark.WithExtensions(
-			extension.GFM,
-			extension.Footnote,
-			extension.DefinitionList,
-		),
-	)
+	exts := []goldmark.Extender{
+		extension.GFM,
+		extension.Footnote,
+		extension.DefinitionList,
+	}
+	if p.shortcodes {
+		exts = append(exts, shortcodeExtension{})
+	}
+	md := goldmark.New(goldmark.WithExtensions(exts...))
 	reader := text.NewReader(body)
 	doc := md.Parser().Parse(reader)
 	return &Renderable{
@@ -439,9 +451,30 @@ func (mr *mdNodeRenderer) renderParagraph(
 	}
 	mr.blankLine()
 	mr.atBlankLine = false
+	// A paragraph that is nothing but a single shortcode is a block-level
+	// shortcode; render it verbatim (expanding it if long) rather than
+	// flowing it as prose.
+	if val, ok := soleShortcodeValue(n); ok {
+		mr.emitShortcode(val)
+		return gmast.WalkSkipChildren
+	}
 	frags := mr.inlineFragments(n)
 	mr.emitWrapped(frags, mr.prefix())
 	return gmast.WalkSkipChildren
+}
+
+// soleShortcodeValue reports whether node's only inline child is a shortcode,
+// returning its verbatim value if so.
+func soleShortcodeValue(node gmast.Node) ([]byte, bool) {
+	c := node.FirstChild()
+	if c == nil {
+		return nil, false
+	}
+	sc, ok := c.(*shortcodeNode)
+	if !ok || c.NextSibling() != nil {
+		return nil, false
+	}
+	return sc.Value, true
 }
 
 // ---------- ThematicBreak ----------
@@ -930,12 +963,11 @@ func (mr *mdNodeRenderer) collectInlineFragments(node gmast.Node, frags *[]inlin
 			code := mr.collectRawText(n)
 			mr.addInlineFrag(frags, child, "`"+code+"`")
 		case *gmast.Emphasis:
-			inner := mr.collectInlineString(n)
 			marker := "*"
 			if n.Level == 2 {
 				marker = "**"
 			}
-			mr.addInlineFrag(frags, child, marker+inner+marker)
+			mr.addBreakableMarkupFrags(frags, child, marker, marker)
 		case *gmast.Link:
 			dest := string(n.Destination)
 			title := string(n.Title)
@@ -960,11 +992,14 @@ func (mr *mdNodeRenderer) collectInlineFragments(node gmast.Node, frags *[]inlin
 		case *gmast.RawHTML:
 			html := mr.rawHTMLText(n)
 			mr.addInlineFrag(frags, child, html)
+		case *shortcodeNode:
+			// A Hugo shortcode is preserved verbatim as a single
+			// unbreakable fragment so it is never wrapped or split.
+			mr.addInlineFrag(frags, child, string(n.Value))
 		case *gmast.String:
 			*frags = append(*frags, inlineFragment{text: string(n.Value)})
 		case *gmext.Strikethrough:
-			inner := mr.collectInlineString(n)
-			mr.addInlineFrag(frags, child, "~~"+inner+"~~")
+			mr.addBreakableMarkupFrags(frags, child, "~~", "~~")
 		case *gmext.TaskCheckBox:
 			if n.IsChecked {
 				*frags = append(*frags, inlineFragment{text: "[x]"})
@@ -991,7 +1026,7 @@ func (mr *mdNodeRenderer) prevIsMarkup(n gmast.Node) bool {
 	switch ps.(type) {
 	case *gmast.Emphasis, *gmast.Link, *gmast.Image,
 		*gmast.CodeSpan, *gmast.AutoLink, *gmast.RawHTML,
-		*gmext.Strikethrough, *gmext.FootnoteLink:
+		*gmext.Strikethrough, *gmext.FootnoteLink, *shortcodeNode:
 		return true
 	}
 	return false
@@ -1078,18 +1113,6 @@ func (mr *mdNodeRenderer) collectRawText(node gmast.Node) string {
 		}
 	}
 	return sb.String()
-}
-
-// collectInlineString collects inline content as a single string,
-// preserving markup.
-func (mr *mdNodeRenderer) collectInlineString(node gmast.Node) string {
-	var frags []inlineFragment
-	mr.collectInlineFragments(node, &frags)
-	var parts []string
-	for _, f := range frags {
-		parts = append(parts, f.text)
-	}
-	return strings.Join(parts, " ")
 }
 
 // segmentsText returns the source text for all line segments of a node.

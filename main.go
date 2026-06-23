@@ -20,6 +20,7 @@ var (
 	width                 int
 	oneSpaceAfterSentence bool
 	noFrontmatter         bool
+	noShortcodes          bool
 	quiet                 bool
 )
 
@@ -34,7 +35,7 @@ If no files are supplied, remark will operate on stdin/stdout.
 `,
 			filepath.Base(os.Args[0]))
 		pflag.PrintDefaults()
-		fmt.Fprintf(os.Stderr, `
+		fmt.Fprint(os.Stderr, `
 Note on inter-sentence spacing: Space is generally preserved.  The -1 switch
 controls only what happens when it isn't.  Consider re-wrapping a paragraph
 where one line ends in a period.  In this case, remark has to insert space
@@ -47,6 +48,11 @@ By default, remark tries to detect (and preserve) frontmatter.  If the
 --no-frontmatter switch is given, the whole file will be blindly parsed as
 Markdown.
 
+By default, remark recognizes Hugo shortcodes ({{< ... >}} and {{% ... %}}).
+Short ones are kept on a single line; long ones are expanded with one
+argument per line for readability.  The --no-shortcodes switch disables this,
+treating them as ordinary text.
+
 remark supports all "standard" Markdown, plus GFM tables, footnotes, and
 definition lists.
 `)
@@ -54,6 +60,7 @@ definition lists.
 	pflag.IntVarP(&width, "width", "w", defaultWidth, "line width for output")
 	pflag.BoolVarP(&oneSpaceAfterSentence, "one-space-after-sentence", "1", false, "put one space between sentences (default two)*")
 	pflag.BoolVar(&noFrontmatter, "no-frontmatter", false, "don't look for frontmatter")
+	pflag.BoolVar(&noShortcodes, "no-shortcodes", false, "don't preserve Hugo shortcodes ({{< >}} and {{% %}})")
 	pflag.BoolVarP(&quiet, "quiet", "q", false, "less loquacious, more laconic")
 }
 
@@ -141,6 +148,7 @@ func run() error {
 		mdparser.WithWidth(width),
 		mdparser.WithOneSpaceAfterSentence(oneSpaceAfterSentence),
 		mdparser.WithFrontmatter(!noFrontmatter),
+		mdparser.WithShortcodes(!noShortcodes),
 		mdparser.WithWarnFunc(warn),
 	)
 
