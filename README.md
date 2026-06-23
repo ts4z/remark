@@ -25,6 +25,24 @@ reconstruct the input.
 This is intended for easy `diff(1)`-ability.  You can run `remark` on a
 directory full of files, and it will try and not change anything.
 
+### Hugo support
+
+This program was written primarily to work with a mostly-Markdown Hugo site.
+As such, we support both Hugo frontmatter as well as Hugo shortcodes.
+
+Frontmatter is canonicalized to YAML and may be reorganized.  For this we use
+the github.com/adrg/frontmatter package.
+
+Hugo shortcodes are indented explicitly in a canonical form depending on length
+and complexity.  Short ones will be rendered inline; longer ones will be broken
+up over mutiple lines with a format that will likely make Lisp users happy.
+
+### Unicode
+
+Input data is assumed to be in UTF-8.  Remark understands enough about glyph
+width in order to render double-wide characters reasonably (using the
+github.com/mattn/go-runewith package).
+
 ### Emacs compatibility
 
 The maintainer is a longtime Emacs addict, so this is mostly consistent with
@@ -49,6 +67,15 @@ sentence).
 
 If you prefer one space in these situations, use the `-1` switch.  This is
 currently the only place where the behavior is configurable.
+
+## Format stability
+
+Format stability is NOT guaranteed, as this is still evolving.
+
+## Idempotency
+
+Running `remark` on a file twice should result in the same output after the
+first and second run.
 
 ## TODO
 
