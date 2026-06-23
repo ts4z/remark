@@ -3,7 +3,8 @@
     "allow": [
       "Bash(go test:*)",
       "Bash(echo \"EXIT: $?\")",
-      "Bash(go list *)"
+      "Bash(go list *)",
+      "Bash(echo \"EXIT:$?\")"
     ]
   }
 }
